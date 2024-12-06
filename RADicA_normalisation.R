@@ -27,9 +27,24 @@ b1_praw <- b1_imp %>%
   ggtitle('Raw peak area') +
   ylab('log(peak area)') +
   ylim(8, 13) +
+  theme(plot.title = element_text(hjust = 0.5)) #+
+  #geom_hline(yintercept = median(log(b1_imp_L$Octane)),
+             #linetype = 'dashed', colour = 'blue')
+
+
+b1_norm_L %>%  
+  filter(class %in% c('ES')) %>%
+  filter(comp == 'Octane') %>%
+  filter(Batch != 5) %>%
+  ggplot(aes(y = peakArea, x = as.Date(Analysis_date), group = as.Date(Analysis_date))) + 
+  geom_point() +
+  theme_bw(base_size = 12) +
+  ggtitle('Raw peak area of external standard (Octane)') +
+  ylab('peak area') +
   theme(plot.title = element_text(hjust = 0.5)) +
-  geom_hline(yintercept = median(log(b1_imp$Octane)),
-             linetype = 'dashed', colour = 'blue')
+  xlab('Date')
+
+  
 
 b1_praw
 b1_pcc2

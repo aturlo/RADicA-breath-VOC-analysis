@@ -94,7 +94,7 @@ b1_imp_c <- x %>% filter(class %in% c('BG','S1', 'S2')) %>%
   #mutate(Sample = str_sub(Sample, end = -13)) # Sample name formatting for B1
 
 
-which(is.na(b_imp_c$peakArea) == TRUE, arr.ind = TRUE)
+which(is.na(b1_imp_c$peakArea) == TRUE, arr.ind = TRUE)
 
 b1_imp_c1 <- b1_imp_c %>%
   pivot_wider(id_cols = c(RAD_ID, comp, Analysis_date, CoreVisit, Batch), 
@@ -107,7 +107,7 @@ b1_imp_c1 <- b1_imp_c %>%
 #
 #
 # identify breath samples with missing BG sample 
-incomplete_s <- b_imp_c1[which(is.na(b_imp_c1$BG), arr.ind = TRUE),] #%>% 
+incomplete_s <- b1_imp_c1[which(is.na(b1_imp_c1$BG), arr.ind = TRUE),] #%>% 
   group_by(Sample) %>% summarise(n = n())
 
 # B1 - exclude from the dataset (BG analysed in different Batch)
@@ -189,7 +189,9 @@ corrs <- b_imp_c1 %>% dplyr::select(!BG) %>%
 
 # measure of dispersion between technical replicates
 # coefficient of variation
-b_imp_c2 <- b_imp_c %>% filter(class != 'BG') %>%
+b1_imp_c2 <- b1_imp_c %>% 
+  filter(CoreVisit %in% c('CV1', 'CV2')) %>%
+  filter(class != 'BG') %>%
   group_by(Sample, comp, Analysis_date) %>%
   summarise(mean = mean(peakArea, na.rm = TRUE),
             sd = sd(peakArea, na.rm = TRUE),
@@ -258,7 +260,7 @@ b1_imp_c2$Analysis_date <- as.Date(b1_imp_c2$Analysis_date)
 
 # IMPORTANT
 # KEEP ONLY CV1 and CV2
-b_imp_c2 <- b_imp_c2 %>% 
+b1_imp_c2 <- b1_imp_c2 %>% 
   left_join(meta %>% dplyr::select(RAD_ID, Analysis_date, CoreVisit)) %>%
   distinct() %>%
   filter(CoreVisit %in% c('CV1', 'CV2'))

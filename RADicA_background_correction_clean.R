@@ -117,9 +117,9 @@ setdiff(endo_b_cv1$comp, endo_b_cv2$comp)
 
 #
 
-wilcox_bg_b1cv1 <- wilcox_bg_fun(b1_imp_sum_c, vocs, 'CV1') %>% 
+wilcox_bg_b1cv1 <- wilcox_bg_fun(b1_imp_sum_c, vocs1, 'CV1') %>% 
   mutate(adj.p.value = p.adjust(p.value, method = 'BH'))
-wilcox_bg_b1cv2 <- wilcox_bg_fun(b1_imp_sum_c, vocs, 'CV2') %>% 
+wilcox_bg_b1cv2 <- wilcox_bg_fun(b1_imp_sum_c, vocs1, 'CV2') %>% 
   mutate(adj.p.value = p.adjust(p.value, method = 'BH'))
 
 wilcox_bg_b1cv1_f <- wilcox_bg_b1cv1 %>% filter(adj.p.value > 0.05)
@@ -136,27 +136,36 @@ cons_b1 <- intersect(endo_b1_cv1$comp, endo_b1_cv2$comp)
 setdiff(endo_b1_cv1$comp, endo_b1_cv2$comp)
 
 intersect(cons_b, cons_b1)
+setdiff(cons_b1, cons_b)
 
 # define VOCs that need removing from the dataset due to similarity with BG
 
-all_vocs <- wilcox_bg_bcv1$comp
-intersect(wilcox_b_agreement, wilcox_b1_agreement)
+all_vocs <- wilcox_bg_b1cv1$comp
+intersect(wilcox_b_agreement, wilcox_b1_agreement) # VOCs where null accepted in both CVs, both datasets
+setdiff(wilcox_b1_agreement, wilcox_b_agreement)
 
-keep_wilcox_min <- intersect(all_vocs[all_vocs %ni% wilcox_b_agreement],
+keep_wilcox_min <- intersect(all_vocs[all_vocs %ni% wilcox_b_agreement], # remove VOCs if null accepted in one dataset
                              all_vocs[all_vocs %ni% wilcox_b1_agreement]) %>%
   as.data.frame() %>%
   rename(comp = '.') 
 
-keep_wilcox_max <- all_vocs[all_vocs %ni% 
+keep_wilcox_max <- all_vocs[all_vocs %ni% # remove VOCs if null accepted in both datasets
                               intersect(wilcox_b_agreement, wilcox_b1_agreement)] %>%
   as.data.frame() %>%
   rename(comp = '.') %>%
-  mutate(wilcox_filter = ifelse(comp %in% keep_wilcox_min$comp, 'Both_datasets', 'One_dataset')) %>%
+  mutate(wilcox_filter = ifelse(comp %in% keep_wilcox_min$comp, 'Both_datasets', 
+                                ifelse(comp %in% wilcox_b_agreement, 'Dataset_1', 'Dataset_2'))) %>%
   mutate(FC_filter = ifelse(comp %in% intersect(cons_b, cons_b1), 'Endo_both_datasets',
-                            ifelse(comp %in% setdiff(cons_b, cons_b1), 'Endo_one_dataset',
-                                   ifelse(comp %in% setdiff(cons_b1, cons_b), 'Endo_one_dataset', 'Exo')))) 
+                            ifelse(comp %in% setdiff(cons_b, cons_b1), 'Endo_dataset_2',
+                                   ifelse(comp %in% setdiff(cons_b1, cons_b), 'Endo_dataset_1', 'Exo')))) 
 
 table(keep_wilcox_max$FC_filter)
+
+keep_wilcox_max <- keep_wilcox_max %>%
+  mutate(wilcox_filter = ifelse(comp %in% c('Pentanal', 'Methyl_thiocyanate'),
+                                'Dataset_1', wilcox_filter))
+
+write.csv(keep_wilcox_max, 'Endo_Exo_filters.csv')
 
 # remove VOCs where null hypothesis accepted in CV1 and CV2 (in B1 and B2)
 b_imp_sum_c <- b_imp_sum_c %>% filter(comp %in% c(keep_wilcox_max$comp, bg_mis)) %>% 
@@ -165,7 +174,7 @@ b_imp_sum_c <- b_imp_sum_c %>% filter(comp %in% c(keep_wilcox_max$comp, bg_mis))
 b1_imp_sum_c <- b1_imp_sum_c %>% filter(comp %in%  c(keep_wilcox_max$comp, bg_mis)) %>%
   filter(comp != 'Internal_Standard') 
 
-n_distinct(b1_imp_sum_c$comp)
+n_distinct(b_imp_sum_c$comp)
 
 write.csv(b_imp_sum_c, 'RADicA_B2_NAfiltered_imputed_CC2_PQN_summarised_BGfiltered.csv')
 write.csv(b1_imp_sum_c, 'RADicA_B1_NAfiltered_imputed_CC2_PQN_summarised_BGfiltered.csv')
@@ -393,6 +402,7 @@ View(test %>% filter(p.value < fdr))
 reg_results_pqn_sign <- reg_results_pqn %>% filter(adj.p.value < 0.05)
 
 write.csv(reg_results_b, 'B2_CC_PQN_regression_results_BG_filtered.csv')
+reg_results_b <- 
 
 # Baseline model on data without influential observations
 # infl observations detected based on the code below
@@ -829,7 +839,7 @@ colnames(reg_results1_b)[5] <- 'p.value'
 
 #
 
-reg_results1_b1_ccpqn_sign <- reg_results1_b1_ccpqn %>% 
+reg_results1_b_sign <- reg_results1_b %>% 
   filter(predictor == 'logBG') %>%
   mutate(adj.p.value = p.adjust(p.value, method = 'BH')) %>%
   filter(adj.p.value < 0.05)
@@ -837,10 +847,13 @@ reg_results1_b1_ccpqn_sign <- reg_results1_b1_ccpqn %>%
 write.csv(reg_results1_b1_ccpqn, 'Model1_results_B1_CCPQN.csv')
 reg_results1_b1 <- read.csv('Model1_results.csv')
 write.csv(reg_results1_b, 'Model1_results_B2.csv')
+reg_results1_b <- read.csv('Model1_results_B2.csv')
 
-asthma_pred_b1 <- reg_results1_b1_ccpqn %>% 
+asthma_pred_b <- reg_results1_b %>% 
   filter(predictor == 'DiagnosisNot Asthma') %>%
   mutate(adj.p.value = p.adjust(p.value, method = 'BH'))
+
+View(asthma_pred_b %>% filter(comp %in% rownames(loads_vip_top)))
 
 asthma_pred_b_sign <- asthma_pred_b %>% filter(p.value < 0.05)
 
@@ -1111,15 +1124,15 @@ ggsave('Baseline_vs_M1_Est_CI.tiff', baseline_vs_m1, dpi = 300, unit = 'mm', wid
 
 # visualise effect of asthma based on confidence and effect size
 # calculation of fold change (not useful?)
-hist(asthma_pred_pqn$p.value, breaks = 30)
-sd(asthma_pred_pqn$p.value)
+hist(asthma_pred_b$p.value, breaks = 30)
+sd(asthma_pred_b$p.value)
 
-asthma_pred_pqn <- asthma_pred_pqn %>%
+asthma_pred_b <- asthma_pred_b %>%
   mutate(lab = ifelse(p.value < 0.05 & Estimate > 0.4, comp, ifelse(
     p.value < 0.05 & Estimate < -0.4, comp, NA))) %>%
   mutate(col = ifelse(is.na(lab) == TRUE, 'no', 'yes'))
 
-vol_plot <- asthma_pred_pqn %>%
+vol_plot <- asthma_pred_b %>%
   ggplot(aes(y = -log10(p.value), x = Estimate)) +
   geom_point(aes(colour = col)) +
   geom_vline(xintercept = c(-0.4, 0.4), linetype = 'dashed', colour = 'darkgrey') +
@@ -1127,10 +1140,10 @@ vol_plot <- asthma_pred_pqn %>%
   theme_bw() +
   geom_text_repel(aes(label = lab), size = 2) +
   theme(legend.position = 'none',
-        plot.title = element_text(hjust = 0.5)) +
+        plot.title = element_text(hjust = 0.5, size = 12)) +
   scale_colour_manual(values = c('yes' = 'red',
                                  'no' = 'black')) +
-  ggtitle('Volcano plot showing effect of asthma diagnosis on breath VOCs') +
+  ggtitle('Volcano plot showing effect of asthma diagnosis on breath VOCs in Dataset 2') +
   xlim(-1, 1) +
   xlab('partial regression coefficient')
 
@@ -1169,11 +1182,11 @@ b_imp_sum_corr <- b_imp_sum_c %>%
   mutate(logS_adj = ifelse(adj.p.value > 0.05 | is.na(adj.p.value), log(S),
                            (log(S) - Estimate*log(BG))))
 
-colnames(b_imp_sum_corr)[10] <- 'CI_lwr'
-colnames(b_imp_sum_corr)[11] <- 'CI_upr'
+colnames(b_imp_sum_corr)[11] <- 'CI_lwr'
+colnames(b_imp_sum_corr)[12] <- 'CI_upr'
 
 # exclude VOCs where 95% CI for logBG coefficient includes 1 
-excl <- b1_imp_sum_corr %>%
+excl <- b_imp_sum_corr %>%
   filter(is.na(Estimate) == FALSE & CI_upr > 1 ) 
 
 b1_imp_sum_corr <- b1_imp_sum_corr %>%
@@ -1212,6 +1225,7 @@ exo <- unique(exo$comp)
 
 b1_endo <- b1_imp_sum_corr_w %>% dplyr::select(!exo)
 b2_endo <- b_imp_sum_corr_w %>% dplyr::select(!exo)
+
 
 # 
 pca_cv12 <- function(data){
@@ -1380,7 +1394,7 @@ write.csv(b_imp_sum_corr_w1, 'RADicA_BG_adjusted_B2_outl_removed.csv')
 
 pca_cv12 <- function(data){
   assay <- data[,-c(1:4)]
-  pc <- pca(assay, center = TRUE, scale = TRUE, ncomp = 4)
+  pc <- mixOmics::pca(assay, center = TRUE, scale = TRUE, ncomp = 2)
   #multilevel = b1_sub_corr1_w$RAD_ID)
   pc_plot <- plotIndiv(pc,
                        #pch = 1,
@@ -1388,20 +1402,21 @@ pca_cv12 <- function(data){
                        group = data$Diagnosis,
                        legend = TRUE,
                        comp = c(1,2),
-                       pch = as.factor(data$CoreVisit),
+                       #pch = as.factor(data$CoreVisit),
                        size.title = 10,
                        title = 'Dataset 2',
-                       cex = 1.5)
+                       cex = 3#1.5
+                       )
 }
 
 
 
 dev.new()
 pc_plot_out_b1 <- pca_cv12(b1_imp_sum_corr_w1)
-pc_plot_out_b1 <- pca_cv12(b1_endo1)
+pc_plot_out_b1 <- pca_cv12(b1_endo)
 
 pc_plot_out <- pca_cv12(b_imp_sum_corr_w1)
-pc_plot_out <- pca_cv12(b2_endo1)
+pc_plot_out <- pca_cv12(b2_endo)
 
 pc_plots_out <- arrangeGrob(pc_plot_out_b1$graph, pc_plot_out$graph, ncol = 1,
                             top = textGrob('PCA of breath sample VOCs'))
@@ -1414,8 +1429,8 @@ ggsave('PCA_corr_out_B1B2.tiff', pc_plots_out, dpi = 300, unit = 'mm', width = 1
 pc_corr_b1 <- pca(b1_imp_sum_corr_w1[,-c(1:4)], scale = TRUE, center = TRUE)
 pc_corr_b2 <- pca(b_imp_sum_corr_w1[,-c(1:4)], scale = TRUE, center = TRUE) 
 
-pc_corr_b1_endo <- pca(b1_endo1[,-c(1:4)], scale = TRUE, center = TRUE)
-pc_corr_b2_endo <- pca(b2_endo1[,-c(1:4)], scale = TRUE, center = TRUE) 
+pc_corr_b1_endo <- pca(b1_endo[,-c(1:4)], scale = TRUE, center = TRUE)
+pc_corr_b2_endo <- pca(b2_endo[,-c(1:4)], scale = TRUE, center = TRUE) 
 
 score_boxplot <- function(pc, data, PC){
   scores <- {{pc}}$variates$X %>% as.data.frame() %>% mutate(Sample = rownames(.)) %>%
@@ -1439,23 +1454,49 @@ score_boxplot(pc_corr_b2_endo, b2_endo1, 'PC1')
 loads_fun <- function(pc, data, PC) {
   loads <- {{pc}}$loadings$X %>% as.data.frame() %>% mutate(comp = rownames(.)) %>%
   dplyr::select(PC, comp) %>%
-  left_join(reg_valid_join %>% dplyr::select(comp, FC_filter, wilcox_filter)) %>%
-  distinct()
+  left_join(reg_valid_join %>% dplyr::select(comp, FC_filter, wilcox_filter, sign)) %>%
+  mutate(comp = str_trunc(comp, 34)) %>%
+  distinct() %>%
+  mutate(FC_filter = ifelse(is.na(FC_filter), 'Unknown', FC_filter)) %>%
+  rename(BGcorr = sign)
   colnames(loads)[1] <- 'PC'
   
   loads %>% arrange(desc(abs(PC))) %>%
   slice(1:15) %>%
-  ggplot(aes(x = PC, y = fct_inorder(as.factor(comp)), fill = FC_filter)) + geom_col() +
+  ggplot(aes(x = PC, y = fct_inorder(as.factor(comp)), fill = FC_filter, colour = BGcorr)) + 
+  geom_col() +
   theme_bw() + scale_fill_brewer(palette = 'Set2') +
-  xlab(PC)}
+  xlab(PC) +
+  theme(axis.title.y = element_blank()#,
+  #legend.position = 'none'
+  )
+  }
 
-loads_fun(pc_corr_b1, b1_imp_sum_corr_w1, 'PC1') + ggtitle('B1 all')
-dev.new()
-loads_fun(pc_corr_b1_endo, b1_endo1, 'PC1') + ggtitle('B1 endo')
+b1p1 <- loads_fun(pc_corr_b1, b1_imp_sum_corr_w1, 'PC1')
+b1p2 <- loads_fun(pc_corr_b1, b1_imp_sum_corr_w1, 'PC2')
 
-dev.new()
-loads_fun(pc_corr_b2, b_imp_sum_corr_w1, 'PC2') + ggtitle('B2 all')
-loads_fun(pc_corr_b2_endo, b2_endo1, 'PC1') + ggtitle('B2 endo')
+b1p1
+
+b1ps <- arrangeGrob(b1p1, b1p2, nrow = 1, top = textGrob('Dataset 1 loadings', hjust = 1),
+                    widths = c(0.38, 0.62))
+plot(b1ps)
+ggsave('PCA_loadings_B1_corr.tiff', b1ps, dpi = 300, 
+       unit = 'mm', width = 200, height = 80)
+
+#
+
+b2p1 <- loads_fun(pc_corr_b2, b_imp_sum_corr_w1, 'PC1')
+b2p2 <- loads_fun(pc_corr_b2, b_imp_sum_corr_w1, 'PC2')
+
+b2ps <- arrangeGrob(b2p1, b2p2, nrow = 1, top = textGrob('Dataset 2 loadings', hjust = 0.3),
+                    widths = c(0.5, 0.5))
+plot(b2ps)
+ggsave('PCA_loadings_B2_corr.tiff', b2ps, dpi = 300, 
+       unit = 'mm', width = 160, height = 80)
+
+#
+
+loads_fun(pc_corr_b2_endo, b2_endo, 'PC1')
 
 ggsave('PCA_loadings_B2_corr.tiff', b2_pc2, dpi = 300, unit = 'mm', width = 130, height = 80)
 
@@ -1491,7 +1532,7 @@ b_imp_sum_c <- b_imp_sum_c %>% left_join(meta %>% dplyr::select(RAD_ID, Diagnosi
 b1_imp_sum_c <- b1_imp_sum_c %>% left_join(meta %>% dplyr::select(RAD_ID, Diagnosis)) %>%
   distinct()
                               
-reg_valid_out <- bind_rows(lapply(b12_voc, function(voc) {
+reg_valid_base <- bind_rows(lapply(b12_voc, function(voc) {
   sub_train <- b_imp_sum_c %>%
       filter(comp == voc) %>%
       filter(CoreVisit %in% c('CV1', 'CV2')) %>%
@@ -1551,6 +1592,7 @@ median(reg_valid_base_sign$mae)
 median(reg_valid_out_sign$mae)
 median(reg_valid_null_sign$mae)
 
+hist(reg_valid_join$)
 
 # error for the null model
 reg_valid_null <- bind_rows(lapply(b12_voc, function(voc) {
@@ -1597,11 +1639,19 @@ reg_valid_null1 <- reg_valid_null %>%
 
 reg_valid_null_sign <- reg_valid_null1 %>% filter(adj.p.value < 0.05)
 
-plot(reg_valid_out$mape, reg_valid_null$mape) + abline(0,1)
+plot(reg_valid_out_sign$mape, reg_valid_null_sign$mape, xlab = 'Trained model', ylab = 'Null model', cex.main = 0.9,
+     cex.lab = 0.9, cex = 0.8,
+     main = 'Mean absolute percentage error') + 
+  abline(0,1, col = 'red', lwd = 2)
 
 
 hist(reg_valid_null$mae - reg_valid_out$mae)
 hist(reg_valid_null$mape - reg_valid_out$mape)
+
+par(mfrow = c(3,1))
+hist(reg_valid_out_sign$me, main = 'Mean error', xlab = '')
+hist(reg_valid_out_sign$mae, main = 'Mean absolute error', xlab = '')
+hist(reg_valid_out_sign$mape, main = 'Mean absolute percentage error', xlab = '')
 
 #
 
@@ -1771,3 +1821,35 @@ timeps <- lapply(rownames(top_loads) , timep)
 marrangeGrob(timeps, nrow = 3, ncol = 1)
 
 View(as.data.frame(b_pass))
+
+#
+#
+#
+
+# visualisation of regression prediction in B2
+subset <- b_imp_sum_c %>%
+  filter(comp == 'Cyclopentane') %>%
+  filter(CoreVisit %in% c('CV1', 'CV2')) %>%
+  drop_na() %>%
+  mutate(logS = log(S), logBG = log(BG)) %>%
+  left_join(infl_obs) %>% # code to exclude influential points based on deletion diagnostics
+  mutate(obs = ifelse(is.na(obs) == TRUE, NA, 'infl')) %>%
+  filter(obs %ni% c('infl'))
+
+model <- lmer(logS ~ logBG + Diagnosis + CoreVisit + (1 | RAD_ID),
+              data = subset)
+
+subset1 <- subset %>% mutate(Diagnosis = 'Asthma', CoreVisit = 'CV1', RAD_ID = 'RAD_001')
+
+predicted <- subset1 %>% mutate(predicted = predict(model, newdata = subset1, allow.new.levels = TRUE))
+
+dimsulf <- predicted %>% ggplot(aes(x = logBG, y = logS)) + geom_point() +
+  geom_line(aes(x = logBG, y = predicted), colour = 'blue') + theme_bw() +
+  ggtitle('Cyclopentane') +
+  geom_abline(intercept = 0, slope = 1, linetype = 'dashed')
+
+
+ggsave('Acetophenone_regression_B2.tiff', plot = aceto, dpi = 300, unit = 'mm', width = 80, height = 60)
+ggsave('Cyclopentane_regression_B2.tiff', plot = dimsulf, dpi = 300, unit = 'mm', width = 75, height = 60)
+
+b2_logbg <- reg_results1_b %>% filter(predictor == 'logBG') %>% mutate(adj.p = p.adjust(p.value, method = 'BH'))
