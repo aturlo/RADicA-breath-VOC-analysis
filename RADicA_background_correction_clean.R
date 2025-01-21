@@ -26,6 +26,7 @@ library(pcaPP)
 b1_imp_sum_c <- read.csv('RADicA_B1_NAfiltered_imputed_CC2_PQN_summarised.csv')[,-1]
 b_imp_sum_c <- read.csv('RADicA_B2_NAfiltered_imputed_CC2_PQN_summarised.csv')[,-1]
 
+
 pqn_imp_sum_c <- read.csv('RADicA_B1_NAfiltered_imputed_PQN_summarised_long_ICC_BGfiltered.csv')[,-1] %>%
   filter(CoreVisit %in% c('CV1', 'CV2'))
 
@@ -33,7 +34,7 @@ meta <- read.csv('Radica sample filenames aligned with clinical metadata.csv')
 
 meta$Analysis_date <- as.Date(meta$Analysis_date, format = '%d/%m/%Y')
 
-infl_obs <- read.csv()
+infl_obs <- read.csv('Deletion_diagnostics_formatted_B2.csv')[,-1]
 
 #
 #
@@ -795,7 +796,8 @@ ggsave('Ethyl_Acetate.tiff', unit = 'mm', dpi = 300, width = 120, height = 80)
 #
 
 # MODEL 1 (Final)
-b_imp_sum_c <- b_imp_sum_c %>% left_join(meta %>% dplyr::select(RAD_ID, Diagnosis)) %>% distinct()
+b1_imp_sum_c <- b1_imp_sum_c %>% left_join(meta %>% dplyr::select(RAD_ID, Diagnosis)) %>% distinct() %>%
+  left_join(clin_dyn %>% dplyr::select(RAD_ID, CoreVisit, FVCPre))
 
 reg_coefs1 <- function(df, voc_list) {
   bind_rows(lapply(voc_list, function(voc){
@@ -810,20 +812,21 @@ reg_coefs1 <- function(df, voc_list) {
       mutate(obs = ifelse(is.na(obs) == TRUE, NA, 'infl')) %>%
       filter(obs %ni% c('infl'))
     
-    model <- lmer(logS ~ logBG + Diagnosis + CoreVisit + (1 | RAD_ID),
+    model <- lmer(logS ~ logBG + Diagnosis + CoreVisit + FVCPre +
+                  (1 | RAD_ID),
                   data = subset)
     
     #model <- lmer(SlogS ~ logBG + Diagnosis + CoreVisit + (1 | RAD_ID), # code for standarised regression coefficients
                   #data = subset)
     
     coefs <- cbind(as.data.frame(coef(summary(model))),
-                   as.data.frame(confint(model)[3:6,])) %>%
-      mutate(comp = rep(voc, 4),
-             n = rep(nrow(subset), 4),
-             r2 = rep(r2(model)[[2]], 4), 
+                   as.data.frame(confint(model)[3:7,])) %>%
+      mutate(comp = rep(voc, 5),
+             n = rep(nrow(subset), 5),
+             r2 = rep(r2(model)[[2]], 5), 
              predictor = rownames(.),
-             AIC = rep(AIC(model), 4),
-             BIC = rep(BIC(model), 4))
+             AIC = rep(AIC(model), 5),
+             BIC = rep(BIC(model), 5))
     
     
   }))
@@ -833,9 +836,14 @@ reg_coefs1 <- function(df, voc_list) {
 vocs <- unique(b_imp_sum_c$comp)
 vocs <- vocs[vocs %ni% c('Pentanal', 'Methylthioacetate')]
 
-reg_results1_b <- reg_coefs1(b_imp_sum_c, vocs)
+vocs <- vocs[vocs != 'Methyl_thiocyanate']
+
+reg_results1_b <- reg_coefs1(b1_imp_sum_c, vocs)
 
 colnames(reg_results1_b)[5] <- 'p.value'
+
+View(reg_results1_b %>% filter(predictor == 'FVCPre') %>%
+       filter(p.value < 0.05))
 
 #
 

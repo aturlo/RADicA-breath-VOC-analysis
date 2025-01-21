@@ -146,11 +146,11 @@ reg_valid_join %>% filter(model == 'Model1') %>%
 #
 
 # MINT
-rownames(b_corr_w1) <- b_corr_w1$Sample
+rownames(b1_corr_w1) <- b1_corr_w1$Sample
 
-X <- b_corr_w1[,-c(1:4)]
-Y <- b_corr_w1$Diagnosis
-study <- b_corr_w1$CoreVisit
+X <- b1_corr_w1[,-c(1:4)]
+Y <- b1_corr_w1$Diagnosis
+study <- b1_corr_w1$CoreVisit
 
 study[study == 'CV1'] <- 1
 study[study == 'CV2'] <- 2
@@ -161,37 +161,9 @@ set.seed(1410)
 base <- mint.plsda(X, Y, study = study, ncomp = 1, scale = TRUE)
 base$prop_expl_var$X
 
-
-# plot results
-# 2 components
-mint_sp_global <- plotIndiv(base, legend = TRUE,
-          study = 'global',
-          title = 'Global scores plot of multi-group PLS-DA',
-          cex = 1.5,
-          size.title = rel(1.2),
-          size.subtitle = rel(1),
-          subtitle = 'Dataset 2',
-          legend.title = 'Diagnosis')
-
-ggsave('MINT_scores_plot_global.tiff', mint_sp_global$graph, dpi = 300, unit = 'mm',
-       width = 120, height = 70)
-#
-
-mint_sp_partial <- plotIndiv(base, 
-                            study = 'all.partial',
-                            title = 'Partial scores plots of multi-group PLS-DA',
-                            cex = 1.5,
-                            size.title = rel(1.2),
-                            size.subtitle = rel(1),
-                            subtitle = c('Core Visit 1', 'Core Visit 2'),
-                            legend = FALSE)
-
-ggsave('MINT_scores_plot_partial.tiff', mint_sp_partial$graph, dpi = 300, unit = 'mm',
-       width = 120, height = 70)
-
 # 1 component
 # global variates
-plot_variates <- function(variates, data) {
+plot_variates <- function(model, variates, data) {
   smint_scores <- variates %>% as.data.frame() %>% mutate(Sample = rownames(.)) %>%
   left_join(data %>% dplyr::select(Sample, Diagnosis, CoreVisit))
   
@@ -203,7 +175,7 @@ plot_variates <- function(variates, data) {
   theme_bw(base_size = 10) +
   scale_fill_manual(values = c('Not Asthma' = 'darkorange1',
                                'Asthma' = 'dodgerblue2')) +
-  ylab(paste('Component 1 (', round(as.numeric(base1$prop_expl_var$X[3])*100, 2), '% )')) +
+  ylab(paste('Component 1 (', round(as.numeric(model$prop_expl_var$X[3])*100, 2), '% )')) +
   ggtitle('Global scores plot') +
   theme(plot.title =  element_text(hjust = 0.5))
   
@@ -282,7 +254,7 @@ data <- b1_corr_w1
 set.seed(1410)
 
 cv_perf <- 
-  replicate(n = 100, expr = {
+  replicate(n = 10, expr = {
     p <- n_distinct(data$RAD_ID)
     x <- sample(1:p)
     names(x) <- unique(data$RAD_ID)
@@ -368,17 +340,23 @@ sens
 spec
 
 # M-fold CV for variable number selection
-data <- b1_corr_w1
+data <- b_corr_w1
+lv <- 5
+nvar <- 10
+
+set.seed(123)
 
 cv_perf_vs <-
-  replicate(n = 50, expr = {
+  replicate(n = 1, expr = {
     p <- n_distinct(data$RAD_ID)
     x <- sample(1:p)
     names(x) <- unique(data$RAD_ID)
-    levels <- 8
+    levels <- lv
     folds <- split(x, x%%levels)
     
     vs_BER <- data.frame()
+    vs_vocs <- list()
+  
     
     for (m in as.character(0:(levels - 1))) {
       test_id <- folds[[m]]
@@ -395,6 +373,7 @@ cv_perf_vs <-
       
       vs_ber <- function(vn) {
         BER <- vector(mode = "numeric", vn)
+        VOCS <- list()
         for(n in seq_len(vn)) {
         model <- mint.splsda(X = X[-c(test),], Y = Y[-c(test)], 
                         study = droplevels(study[-c(test)]), ncomp = 1,
@@ -418,25 +397,32 @@ cv_perf_vs <-
       #conf_mat <- table(factor(out_pred, levels = levels(sum_cv_pred$Diagnosis)), 
       #sum_cv_pred$Diagnosis)
       # for sample-level prediction use code below
+        
+      loads <- model[['loadings']][['X']] %>% as.data.frame() %>% filter(comp1 != 0) 
+      vocs <- rownames(loads)
+
       out_pred <- model_pred[["class"]][["centroids.dist"]] %>% as.data.frame() %>% dplyr::select(1)
       conf_mat <- table(factor(out_pred$comp1, levels = levels(as.factor(test_data$Diagnosis))), 
                         test_data$Diagnosis)
+      VOCS <- append(VOCS, list(vocs))
       BER[n] <- if (ncol(conf_mat) == 2) {
         ber_fun(conf_mat)
         } else {
         NA}
       
       }
-        BER
+        out <- list(BER, VOCS)
       }
-      vs_out <- vs_ber(100)
-      vs_BER = rbind(vs_BER, vs_out)
-      colnames(vs_BER) <- sapply(1:100, function(g){paste('VN', g, sep = '')})
+      vs_out <- vs_ber(nvar)
+      vs_BER = rbind(vs_out[[1]], vs_BER)
+      colnames(vs_BER) <- sapply(1:nvar, function(g){paste('VN', g, sep = '')})
+      vs_vocs <- append(vs_vocs, list(unlist(vs_out[[2]])))
     }
-    out <- vs_BER
+    out <- list(vs_BER, vs_vocs)
   }, simplify = F)
 
-cv_perf_vs_df <- bind_rows(cv_perf_vs)
+
+cv_perf_vs_df <- bind_rows(cv_perf_vs[[1]][[1]])
 cv_perf_vs_df_sum <- cv_perf_vs_df %>% pivot_longer(cols = everything(), 
                         names_to = 'VN', values_to = 'BER') %>%
   mutate(VN = as.factor(VN)) %>%
@@ -459,7 +445,16 @@ cv_perf_vs_df_sum %>%
   theme_bw() +
   ylab('Balanced Error Rate') 
 
-ggsave('sMINT_tuning_var_number_B1.tiff', unit = 'mm', dpi = 300, width = 180, height = 80)
+ggsave('sMINT_tuning_var_number_B2_50vars.tiff', unit = 'mm', dpi = 300, width = 180, height = 80)
+
+#
+
+vocs_freq <- table(unlist(cv_perf_vs[[1]][[2]])) %>% as.data.frame() %>%
+  mutate(stab = Freq/(lv*nvar))
+
+View(vocs_freq %>% filter(stab > 0.5))
+
+write.csv(vocs_freq, 'sMINT_variable_stability.csv')
 
 #
 #
@@ -469,8 +464,9 @@ ggsave('sMINT_tuning_var_number_B1.tiff', unit = 'mm', dpi = 300, width = 180, h
 vs_ber <- function(vn) {
   BER <- vector(mode = "numeric", vn)
   for(n in seq_len(vn)) {
-    train <- b1_corr_w1
-    test_b1_df <- b_corr_w1 %>% mutate(CoreVisit = 'B1_CV')
+    train <- b_corr_w1
+    test_b1_df <- b1_corr_w1 %>% #filter(CoreVisit == 'CV2') %>%
+      mutate(CoreVisit = 'B1_CV')
     conc_corr_w1 <- rbind(train, test_b1_df)
     rownames(conc_corr_w1) <- conc_corr_w1$Sample
     X <- conc_corr_w1[,-c(1:4)]
@@ -504,8 +500,8 @@ vs_ber <- function(vn) {
 }
 
 set.seed(123)
-vs_test <- vs_ber(100)
-names(vs_test) <- c(1:100)
+vs_test <- vs_ber(50)
+names(vs_test) <- c(1:50)
 plot(names(vs_test), vs_test)
 vs_test[vs_test == min(vs_test)]
 
@@ -694,7 +690,7 @@ pls.da <- plsda(X = b_corr_w1[,-c(1:4)], Y = b_corr_w1$Diagnosis, ncomp = 1, sca
 pls.da_perf <- perf(pls.da, folds = 8, nrepeat = 100)
 pls.da_perf$error.rate
 
-pred_pls.da <- predict(pls.da, newdata = b1_corr_w1[,-c(1:4)])
+pred_pls.da <- predict(pls.da, newdata = b_corr_w1[,-c(1:4)])
 
 pred_class <- pred_pls.da[["class"]][["centroids.dist"]] %>% as.data.frame() %>% dplyr::select(1)
 
@@ -711,11 +707,40 @@ plotLoadings(pls.da, ndisplay = 10,
              contrib = 'max',
              legend = FALSE)
 
+# PLS-DA + mixed effect model
+plsda_pred_vals <- data.frame(Y.pred = pred_pls.da$predict[,,1][,1],
+                              out = b_corr_w1$Diagnosis,
+                              RAD_ID = b_corr_w1$RAD_ID,
+                              CoreVisit = b_corr_w1$CoreVisit) %>%
+  mutate(out = ifelse(out == 'Asthma', 1 ,0))
+
+glmMod <- glm(out ~ Y.pred,
+              data = plsda_pred_vals,
+              family = 'binomial'(link = 'logit'))
+
+summary(glmMod)
+
+mixMod <- glmer(out ~ Y.pred + (1 | CoreVisit),
+              data = plsda_pred_vals,
+              family = 'binomial'(link = 'logit'))
+
+
+summary(mixMod)
+
+dev.new()
+plsda_pred_vals %>% 
+  filter(out == 0) %>%
+  ggplot(aes(x = as.factor(CoreVisit), y = Y.pred, group = RAD_ID)) +
+  theme_bw() +
+  theme(legend.position = 'none') + 
+  geom_line() + 
+  geom_point() 
+
 #
 #
 #
 
-# test on Dataset 1
+# test MINT on Dataset 1
 train <- b1_corr_w1
 test_b1_df <- b_corr_w1 %>% filter(CoreVisit == 'CV2') %>%
   mutate(CoreVisit = 'B1_CV')
@@ -898,7 +923,7 @@ base_tune$choice.keepX
 loads_glob <- base$loadings$X %>% as.data.frame() %>%
   mutate(comp = rownames(.)) %>% 
   left_join(reg_valid_join %>% dplyr::select(comp, sign)) %>%
-  left_join(endo_exo_2 %>% dplyr::select(comp, FC_filter)) %>%
+  left_join(endo_exo %>% dplyr::select(comp, FC_filter)) %>%
   distinct()
 
 loads_glob1 <- loads_glob %>% arrange(desc(abs(comp1))) %>%
@@ -963,23 +988,32 @@ loads_glob1_sum %>% rbind(loads_part_b11_cv1_sum, loads_part_b11_cv2_sum) %>%
 ggsave('Bar_plot_class_loadings_B1.tiff', unit = 'mm', dpi = 300, width = 170, height = 80)
 
 # variable importance
-loads_vip_b1 <- vip(base) %>% as.data.frame()
+loads_vip_b <- vip(base) %>% as.data.frame()
 
 nrow(loads_vip %>% filter(comp1 > 1))
 hist(loads_vip$comp1)
+
+colnames(vocs_freq)[1] <- 'comp'
+vocs_perf_base <- loads_vip_b %>% mutate(comp = rownames(.)) %>%
+  left_join(vocs_freq) %>%
+  rename(vip = comp1)
+
+plot(vocs_perf_base$vip, vocs_perf_base$stab)
+
+top_stab <- vocs_perf_base %>% filter(stab > 0.7)
 
 #
 #
 
 Lglob1 <- loads_glob %>% 
   mutate(sign = ifelse(is.na(sign), 'no', sign)) %>%
-  left_join(icc_b12w %>% dplyr::select(comp, ICC_B2, CI_lwr_B2)) %>%
-  mutate(ICC_B2 = ifelse(ICC_B2 < 0, 0, ICC_B2),
-         sign_icc = ifelse(CI_lwr_B2 < 0, 'no', 'yes'),
-         comp = str_trunc(comp, 33)) %>%
+  #left_join(icc_b12w %>% dplyr::select(comp, ICC_B2, CI_lwr_B2)) %>%
+  #mutate(ICC_B2 = ifelse(ICC_B2 < 0, 0, ICC_B2),
+   #      sign_icc = ifelse(CI_lwr_B2 < 0, 'no', 'yes'),
+    #     comp = str_trunc(comp, 33)) %>%
   rename(BG_corr = sign) %>%
   arrange(desc(abs(comp1))) %>% 
-  slice(1:46) %>% 
+  slice(1:50) %>% 
   ggplot(aes(x = comp1, y = fct_inorder(as.factor(comp)), 
              #fill = ICC_B1,
              fill = FC_filter,
@@ -992,6 +1026,7 @@ Lglob1 <- loads_glob %>%
   #scale_fill_viridis_b(limits = c(0, 0.7)) +
   theme(axis.title.y = element_blank())
 
+Lglob1
 
 Lglob1 + ggtitle('Global loadings')
 
@@ -2147,3 +2182,48 @@ model <- glm(as.factor(Diagnosis) ~ X3_methylpentane +  Ethyl_butanoate + CoreVi
               family = 'binomial')
 
 summary(model)
+
+box2 <- b_corr_w1 %>% ggplot(aes(x = CoreVisit, y = X3_methylpentane, fill = Diagnosis)) +
+  geom_violin(alpha = 0.7) + 
+  geom_boxplot(width = 0.3, position = position_dodge(width = 0.9), alpha = 0) + 
+  theme_bw() +
+  #theme(legend.position = 'none') +
+  ylab('log(peak area)') +
+  scale_fill_manual(values = c('Not Asthma' = 'orange', 'Asthma' = 'blue'))
+
+box1 <- box1 + ggtitle('Dataset 1')
+box1
+
+box2 <- box2 + ggtitle('Dataset 2')
+box2
+
+boxes <- arrangeGrob(box1, box2, widths = c(0.42, 0.58))
+plot(boxes)
+
+ggsave('3methylpentane_boxplots_diagnosis.tiff', boxes, dpi = 300, unit = 'mm', width = 160, height = 60)
+
+b2_uni <- b_imp_sum_c %>% filter(comp == 'X3_methylpentane') %>%
+  left_join(b_corr_w1 %>% dplyr::select(RAD_ID, Diagnosis)) %>% distinct() %>%
+  mutate(Sample = paste(RAD_ID, CoreVisit, sep = '_')) %>%
+  left_join(clin_dyn_imp_b2 %>% dplyr::select(Sample, FVCPre))
+
+outl <- infl_obs %>% filter(comp == 'X3_methylpentane')
+
+b2_uni1 <- b2_uni %>% filter(Sample %ni% outl$Sample)
+
+#
+
+b1_uni <- b1_imp_sum_c %>% filter(comp == 'X3_methylpentane') %>%
+  left_join(b1_corr_w1 %>% dplyr::select(RAD_ID, Diagnosis)) %>% distinct() %>%
+  mutate(Sample = paste(RAD_ID, CoreVisit, sep = '_')) %>%
+  left_join(clin_dyn_imp_b1 %>% dplyr::select(Sample, FVCPre))
+
+
+uniMod <- lmer(log(S) ~ log(BG) + Diagnosis + CoreVisit + (1|RAD_ID),
+               data = b2_uni1)
+
+summary(uniMod)
+
+uniMod1 <- lmer(log(S) ~ log(BG) + Diagnosis + CoreVisit + FVCPre + (1|RAD_ID),
+                data = b2_uni1)
+summary(uniMod1)
