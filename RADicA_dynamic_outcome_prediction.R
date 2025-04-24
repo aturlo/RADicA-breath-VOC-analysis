@@ -11,6 +11,8 @@ library(stringr)
 library(ggcorrplot)
 library(ggfortify)
 library(irr)
+library(scales)
+library(shades)
 
 # custom functions
 '%ni%' <- Negate('%in%')
@@ -127,8 +129,17 @@ ggsave('PCA_dynamic_outcomes.tiff', dpi = 300, unit = 'mm', width = 150, height 
 
 
 # agreement between core visits
-icc_clin_dyn <- bind_rows(lapply(colnames(clin_dyn)[-c(1:2)], function(out) {
-  input <- clin_dyn %>% dplyr::select(RAD_ID, CoreVisit, out) %>%
+# each dataset analysed separately
+clin_dyn$Sample <- paste(clin_dyn$RAD_ID, clin_dyn$CoreVisit, sep = '_')
+
+clin_dyn_b1 <- clin_dyn %>% filter(Sample %in% b1_corr_w1$Sample)
+clin_dyn_b2 <- clin_dyn %>% filter(Sample %in% b_corr_w1$Sample)
+
+# specify dataset for analysis
+data <- clin_dyn_b2
+
+icc_clin_dyn_b2 <- bind_rows(lapply(colnames(data)[-c(1:2)], function(out) {
+  input <- data %>% dplyr::select(RAD_ID, CoreVisit, out) %>%
   pivot_wider(names_from = CoreVisit, values_from = out) %>%
   dplyr::select(!RAD_ID)
   icc_res <- icc(input, model = 'twoway', type = 'agreement', unit = 'single')
@@ -136,10 +147,37 @@ icc_clin_dyn <- bind_rows(lapply(colnames(clin_dyn)[-c(1:2)], function(out) {
                      ICC = icc_res$value, 
                      p.value = icc_res$p.value,
                      CI_lwr = icc_res$lbound, CI_upr = icc_res$ubound)
-  }))
+  })) 
 
 
 write.csv(icc_clin_dyn, 'ICC_dynamic_clinical_outcomes.csv')
+
+# plot agreement between the datasets
+icc_clin_dyn <- icc_clin_dyn_b1 %>% mutate(dataset = 'B1') %>%
+  rbind(icc_clin_dyn_b2 %>% mutate(dataset = 'B2')) %>%
+  drop_na()
+
+
+cols <- hue_pal()(3)
+swatch(cols)
+
+icc_clin_dyn %>% 
+  filter(var != 'ACQPoints') %>%
+  pivot_wider(names_from = dataset, values_from = c('ICC', 'p.value', 'CI_lwr', 'CI_upr')) %>%
+  mutate(p_agreement = ifelse(p.value_B1 < 0.05 & p.value_B2 < 0.05, 'both', 'neither')) %>%
+  ggplot(aes(x = ICC_B1, y = ICC_B2)) +
+  geom_point(colour = cols[2]) +
+  geom_abline(intercept = 0, slope = 1, linewidth = 0.3) +
+  #xlim(0.44, NA) +
+  #ylim(0.44, NA) +
+  theme_bw(base_size = 10) +
+  geom_text_repel(aes(label = var), size = 2) +
+  xlim(0.8, NA) +
+  ylim(0.8, NA)
+
+ggsave('ICC_dynamic_outcomes.tiff', units = 'mm', dpi = 300, width = 67, height = 73)
+
+
 
 #
 #

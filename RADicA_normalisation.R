@@ -23,7 +23,6 @@ b2_imp <- read.csv('RADicA_B2_NAfiltered_imputed.csv')[,-1]
 rownames(b1_imp) <- b1_imp$Sample
 rownames(b2_imp) <- b2_imp$Sample
 
-# load metadata
 meta <- read.csv('Radica sample filenames aligned with clinical metadata.csv')
 
 # custom functions
@@ -31,19 +30,15 @@ meta <- read.csv('Radica sample filenames aligned with clinical metadata.csv')
 
 ################################
 
-## format imputed datasets
-# move Batch 5 samples from dataset 1 to dataset 2
-b5 <- b1_imp %>% filter(Batch == 5)
-b1_imp <- b1_imp[b1_imp$Sample %ni% b5$Sample,]
-b2_imp <- rbind(b2_imp, b5)
-
-# replace analysis date recorded by GCMS with collection date
+# format imputed dataset
 # specify dataset for analysis
 b_imp <- b2_imp
 
-b_imp_L <- b_imp %>% pivot_longer(cols = c(6:ncol(b_imp)), names_to = 'comp', values_to = 'peakArea')
+## replace analysis date recorded by GCMS with collection date
+b_imp_L <- b_imp %>% pivot_longer(cols = c(6:ncol(b_imp)), names_to = 'comp', values_to = 'peakArea') %>%
+  mutate(peakArea = ifelse(peakArea < 10, 10, peakArea)) # replace imputed peak area values < 10 with 10
 
-# 
+
 b_imp <- b_imp_L %>% pivot_wider(names_from = comp, values_from = peakArea) %>%
   mutate(Analysis_date = paste(str_sub(Sample, start = 5, end = 6),
                                str_sub(Sample, start = 3, end = 4),
@@ -56,12 +51,12 @@ b_imp$Analysis_date <- as.Date(b_imp$Analysis_date, format = '%d%m%Y')
 rownames(b_imp) <- b_imp$Sample
 
 #
-
-# replace imputed peak area values < 1 with 1
-b_imp[b_imp < 1] <- 1
+#
+#
 
 b1_imp <- b_imp
 b2_imp <- b_imp
+
 
 #
 #
@@ -71,8 +66,8 @@ b2_imp <- b_imp
 
 # NORMALISATION OF IMPUTED DATA
 # specify dataset for analysis
-b_imp <- b2_imp
-dat <- 'B2'
+b_imp <- b1_imp
+dat <- 'B1'
 
 b_imp_L <- b_imp %>% pivot_longer(cols = c(6:ncol(b_imp)), names_to = 'comp', values_to = 'peakArea')
 
@@ -85,8 +80,8 @@ b_IS <- cbind(b_imp[,1:4], b_imp[,5:ncol(b_imp)]/b_imp$Internal_Standard) %>%
 #
 
 ## Component correction (CC)
-# remove outliers from reference datasets (es and blank)
-data <- b_imp
+# remove VOCs not represented in reference sample class in either dataset
+data <- b2_imp
 
 data <- as.data.frame(data)
 rownames(data) <- data$Sample
@@ -96,9 +91,16 @@ assay_es_imp <- data %>% filter(class %in% c('Blank')) %>%
   dplyr::select(!c(Sample, Analysis_date, class, Batch))
 
 # remove features missing in the reference dataset
+nas <- which(is.na(assay_es_imp), arr.ind = TRUE)
+table(nas[,2])
+
 nacols <- which(colSums(is.na(assay_es_imp) == TRUE) > 0)
+nas_voc <- colnames(assay_es_imp[nacols])
+
 assay_es_imp <- assay_es_imp[,-nacols]
 
+
+# remove outliers from reference datasets (es and blank)
 # identify multivariate outliers using robust PCA
 pc <- PCAgrid(log(assay_es_imp), scale = 'sd', center = 'mean')
 
@@ -112,6 +114,8 @@ od <- as.data.frame(sdod$ODist)
 rownames(od) <- rownames(assay_es_imp)
 odOut <- od %>% filter(V1 > sdod$critOD[1,1] | V2 > sdod$critOD[2,1])
 
+intersect(rownames(sdOut), rownames(odOut))
+
 # remove outliers from the QC database
 assay_es_imp1 <- assay_es_imp %>% filter(rownames(.) %ni% rownames(odOut)) %>%
   filter(rownames(.) %ni% rownames(sdOut))
@@ -123,7 +127,7 @@ annot_es1 <- data %>% filter(class == 'Blank') %>%
   filter(rownames(.) %ni% rownames(sdOut))
 
 pc_es <- pca(log(assay_es_imp), scale = TRUE, center = TRUE, ncomp = 2)
-pc_es1 <- pca(log(assay_es_imp1[-147,]), scale = TRUE, center = TRUE, ncomp = 2)
+pc_es1 <- pca(log(assay_es_imp1), scale = TRUE, center = TRUE, ncomp = 2)
 
 #
 
@@ -133,7 +137,7 @@ plotIndiv(pc_es,
           legend = TRUE)
 
 plotIndiv(pc_es1,
-          group = annot_es1$Batch[-147], # obs 147 additional outlier in B2
+          group = annot_es1$Batch, 
           pch = 1,
           legend = TRUE)
 
@@ -143,7 +147,7 @@ loadings <- pc_es1$loadings[['X']] %>% as.data.frame() %>%
 
 # subset all observations apart from reference class
 Y <- data %>% 
-  filter(class != 'Blank') %>%
+  filter(class %ni% c('Blank')) %>%
   dplyr::select(colnames(assay_es_imp1)) %>% 
   log() %>% as.matrix() %>%
   scale(scale = TRUE, center = TRUE)
@@ -181,7 +185,7 @@ for (i in c(1:dim(Y)[2])){
 
 #
 annot <- data %>% 
-  filter(class != 'Blank')
+  filter(class %ni% c('Blank'))
 
 b_cc <- cbind(annot[,1:4], exp(Zres1))
 b_cc2 <- cbind(annot[,1:4], exp(Zres)) # reverse log transformation
@@ -193,9 +197,6 @@ b_cc2 <- cbind(annot[,1:4], exp(Zres)) # reverse log transformation
 
 # PQN normalisation
 # using median peak intensity of Blank and ES datasets as reference 
-# create reference spectrum
-x <- b_imp
-
 # use only ES/blanks as reference
 pqn <- function(ref, data) { 
   xL <- ref %>% pivot_longer(cols =! c(Sample, Analysis_date, Batch, class),
@@ -219,6 +220,7 @@ pqn <- function(ref, data) {
     pivot_wider(names_from = comp, values_from = peakArea) 
 }
 
+
 b_pqn <- pqn(b_imp, b_imp) # change to b2_imp for B1 - use the same reference for both
 
 #
@@ -226,10 +228,16 @@ b_pqn <- pqn(b_imp, b_imp) # change to b2_imp for B1 - use the same reference fo
 #
 
 # CC + PQN
-b_cc2_pqn <- pqn(b1_cc2, b_cc2)
+b2_cc2 <- b_cc2
 
-write.csv(b_cc2_pqn, 'RADicA_B2_NAfiltered_imputed_CC2_PQN.csv') # amend file name depending on dataset
+b2_cc2_pqn <- pqn(b2_cc2, b2_cc2) # change to b2_cc2 for B1 - use the same reference for both
+b1_cc2_pqn <- pqn(b2_cc2, b1_cc2)
 
+plotIndiv(pca(log(b2_cc2_pqn[,-c(1:4)]), scale = TRUE), pch = 1)
+
+# save normalised dataset
+write.csv(b1_cc2_pqn, 'RADicA_B1_NAfiltered_imputed_CC2_PQN.csv') # amend file name depending on dataset
+write.csv(b2_cc2_pqn, 'RADicA_B2_NAfiltered_imputed_CC2_PQN.csv')
 #
 #
 #
@@ -266,14 +274,13 @@ disp_cc2_pqn <- disp(b_cc2_pqn, 'CC2 PQN')
 #
 
 disp_conc <- rbind(disp_raw, disp_IS, disp_cc,
-                   disp_cc2, disp_pqn,
-                   disp_cc2_pqn)
+                   disp_cc2, disp_pqn, disp_cc2_pqn)
 
 # visualise distribution of relative dispersion values following different normalisation methods
 plot_disp <- function(m) { # m = dispersion measure: RSD, rIQR, rMAD
   disp_conc %>% 
   filter(class %ni% c('Blank')) %>%
-  ggplot(aes(x = .data[[m]], y = factor(norm, levels = c('CC2 PQN', 'CC2', 'CC21','CC', 'PQN', 'IS', 'Raw')), 
+  ggplot(aes(x = .data[[m]], y = factor(norm, levels = c('CC2 PQN', 'CC2','CC', 'PQN', 'IS', 'Raw')), 
              fill = norm)) +
   geom_boxplot(outliers = FALSE) +
   facet_wrap(~ class, scale = 'free', 
@@ -295,6 +302,8 @@ riqr_p <- plot_disp('rIQR') + theme(plot.title = element_text(size = 9)) +
   ggtitle('Relative interquartile range')
 
 disp_plots <- arrangeGrob(rsd_p, rmad_p, riqr_p, widths = c(0.29, 0.29, 0.42))
+
+dev.new()
 plot(disp_plots)
 
 ggsave(paste('Boxplots_normalisation_', dat, '.tiff', sep =''), disp_plots, dpi = 300, units = 'mm', width = 240, height = 170)
@@ -327,12 +336,10 @@ is_class <- PCA_plot(b_IS %>% filter(class != 'Blank'),
          'IS')
 
 cc_class <- PCA_plot(b_cc %>%
-                       #filter(class == 'ES'),
                        filter(class %ni% c('Blank')),
          'CC')
 
 cc2_class <- PCA_plot(b_cc2 %>%
-                    #filter(class == 'ES'),
                       filter(class %ni% c('Blank')), 
          'CC2')
 

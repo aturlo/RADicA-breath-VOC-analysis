@@ -17,11 +17,13 @@ library(RColorBrewer)
 library(scales)
 library(gridExtra)
 library(ggvenn)
+library(stringr)
 
 ## load data
 # load formatted study data
 b2_all <- read.csv('RADicA_B2.csv')[,-1]
 b1_all <- read.csv('RADicA_B1.csv')[,-1]
+
 
 # load patient metadata
 meta <- read.csv('Radica sample filenames aligned with clinical metadata.csv')
@@ -46,8 +48,8 @@ cnas <- function(d, cutoff){ # cutoff = % of NA per VOC
     xlab('% Missing') +
     xlim(NA,100) +
     geom_vline(xintercept = cutoff, colour = 'red') +
-    annotate('text', x = 12.5, y = 55, label = nrow(fnasF), colour = 'red',
-             cex = 3)
+    annotate('text', x = 28, y = 33, label = nrow(fnasF), colour = 'red',
+             cex = 2)
   p2
   
 }
@@ -70,42 +72,85 @@ ggsave('Histogram_NA_B2_class.tiff', NAhists_b1, dpi = 300, unit = 'mm', width =
 #
 
 # plot frequency of NAs across observations (breath samples only)
-cnas_sample <- function(d, cutoff2) {
-  s1 <- cnas(t(d %>% filter(class %in% c('S1')) %>% dplyr::select(!1:5)),
-           cutoff = cutoff2) + ggtitle('S1')
-  
-  s2 <- cnas(t(d %>% filter(class %in% c('S2')) %>% dplyr::select(!1:5)),
-           cutoff = cutoff2) + ggtitle('S2')
-  s <- grid.arrange(s1, s2, ncol = 2)
+cnas_sample <- function(d, cl, cutoff2) {
+  s1 <- cnas(t(d %>% filter(class %in% c(cl)) %>% dplyr::select(!1:5)),
+           cutoff = cutoff2) + ggtitle(cl)
+  s1
   }
 
-s_b1 <- cnas_sample(b1_all, 50)
-s_b2 <- cnas_sample(b2_all, 50)
+s1_b1 <- cnas_sample(b1_all, 'S1', 35)
+s1_b2 <- cnas_sample(b2_all, 'S1', 35)
 
-ggsave('Histogram_NA_B1_sample.tiff', s_b1, dpi = 300, unit = 'mm', width = 105, height = 50)
-ggsave('Histogram_NA_B2_sample.tiff', s_b2, dpi = 300, unit = 'mm', width = 105, height = 50)
+s2_b1 <- cnas_sample(b1_all, 'S2', 35)
+s2_b2 <- cnas_sample(b2_all, 'S2', 35)
+
+b_b1 <- cnas_sample(b1_all, 'Blank', 35)
+b_b2 <- cnas_sample(b2_all, 'Blank', 35)
+
+bg_b1 <- cnas_sample(b1_all, 'BG', 35)
+bg_b2 <-cnas_sample(b2_all, 'BG', 35)
+
+es_b1 <- cnas_sample(b1_all, 'ES', 35)
+es_b2 <- cnas_sample(b2_all, 'ES', 35)
+
+s_b1 <- arrangeGrob(s1_b1, s2_b1, bg_b1, es_b1, b_b1, nrow = 2, ncol = 3)
+plot(s_b1)
+
+s_b2 <- arrangeGrob(s1_b2, s2_b2, bg_b2, es_b2, b_b2, nrow = 2, ncol = 3)
+plot(s_b2)
+
+ggsave('Histogram_NA_B1_sample.tiff', s_b1, dpi = 300, unit = 'mm', 
+       width = 140, height = 100)
+ggsave('Histogram_NA_B2_sample.tiff', s_b2, dpi = 300, 
+       unit = 'mm', width = 140, height = 100)
 
 #
 
-# identify outlying samples with > 40% NAs
+# identify outlying samples with > 35% NAs
 obs_out <- function(d, CL, cutoff3) {
   d1 <- as.data.frame(t(d %>% filter(class %in% c(CL)) %>% dplyr::select(!1:5)))
   fnas <- as.data.frame(colSums(is.na(d1))/nrow(d1)*100)
   colnames(fnas)[1] <- 'RatioNA'
-  out <- fnas %>% filter(RatioNA > cutoff3) %>% mutate(obs = gsub('V', '', rownames(.))) 
-  d1 <- b_all %>% filter(class %in% c(CL)) %>% dplyr::select(Sample)
+  out <- fnas %>% filter(RatioNA >= cutoff3) %>% mutate(obs = gsub('V', '', rownames(.))) 
+  d1 <- d %>% filter(class %in% c(CL)) %>% dplyr::select(Sample)
   d2 <- d1[out$obs,]
   d2
 }
 
-s1_out_b1 <- obs_out(b21_all, 'S1', 50)
-s2_out_b1 <- obs_out(b1_all, 'S2', 50)
+s1_out_b1 <- obs_out(b1_all, 'S1', 35)
+s1_out_b2 <- obs_out(b2_all, 'S1', 35)
 
-s1_out_b2 <- obs_out(b2_all, 'S1', 50)
-s2_out_b2 <- obs_out(b2_all, 'S2', 50)
+s2_out_b1 <- obs_out(b1_all, 'S2', 35)
+s2_out_b2 <- obs_out(b2_all, 'S2', 35)
+
+bg_out_b1 <- obs_out(b1_all, 'BG', 35)
+bg_out_b2 <- obs_out(b2_all, 'BG', 35)
+
+es_out_b1 <- obs_out(b1_all, 'ES', 35)
+es_out_b2 <- obs_out(b2_all, 'ES', 35)
+
+b_out_b1 <- obs_out(b1_all, 'Blank', 35)
+b_out_b2 <- obs_out(b2_all, 'Blank', 35)
+
+# remove matching breath sample replicates
+s1_out_b2
+s2_out_b2
+
+s1_out_b1
+s2_out_b1
+
+s2_out_b1 <- b1_all %>% 
+  filter(str_detect(b1_all$Sample, paste(str_sub(s1_out_b1, end = -11), '2', sep = ''))) %>%
+  pull(Sample)
 
 # remove the samples with high missing value ratio from the dataset
-b2_all <- b2_all %>% filter(Sample %ni% c(s1_out_b2, s2_out_b2))
+b1_all <- b1_all %>% filter(Sample %ni% c(s1_out_b1, s2_out_b1,
+                                          bg_out_b1, es_out_b1, b_out_b1))
+
+b2_all <- b2_all %>% filter(Sample %ni% c(s1_out_b2, s2_out_b2,
+                                          bg_out_b2, es_out_b2, b_out_b2))
+
+
 
 #
 #
@@ -116,7 +161,12 @@ b2_all <- b2_all %>% filter(Sample %ni% c(s1_out_b2, s2_out_b2))
 
 ## FEATURE FILTERING
 # specify dataset for analysis
-data <- b2_all
+data <- b1_all
+dat <- 'B1'
+
+#
+#
+#
 
 # change dataset to long format
 b_allL <- data %>% pivot_longer(cols =! c(class, Sample, Date, Time, Batch),
@@ -180,7 +230,15 @@ View(t(assay_naFf_s[,rownames(retain_var1)]))
 
 # retain features with < 20% NAs in S1 and/or S2 samples (in either diagnosis group)
 b1_all_f <- b1_all %>% dplyr::select(c(1:5, rownames(retain_var), rownames(complete_var)))
+
+#
+#
+#
+
+# change starting input!
 b2_all_f <- b2_all %>% dplyr::select(c(1:5, rownames(retain_var), rownames(complete_var)))
+
+#
 
 # compare retained VOCs between datasets
 retain_var2 <- intersect(colnames(b1_all_f), colnames(b2_all_f))
@@ -212,3 +270,5 @@ write.csv(b2_all_f, 'RADicA_B2_NAfiltered.csv')
 #
 #
 #
+
+

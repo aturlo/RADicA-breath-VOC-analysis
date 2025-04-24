@@ -4,7 +4,7 @@
 # project: RADicA
 # date: 17/01/2025
 
-#####################
+###############################
 
 library(dplyr)
 library(tidyr)
@@ -16,6 +16,7 @@ library(ggplotify)
 library(stringr)
 library(gridExtra)
 library(lme4)
+library(mixOmics)
 
 ## load data
 # load filtered study data with missing values
@@ -67,18 +68,6 @@ dev.off()
 
 # number of complete variables across groups
 sumint %>% group_by(class) %>% summarise(complete_var = sum(nonas == 0)/n_distinct(comp))
-
-#
-
-# relationship between technical replicates
-ps <- techNA %>% group_by(comp) %>%
-  do(plots = ggplot(data = .) + (aes(y = log(S1), x = log(S2))) + geom_point() +
-       ggtitle(.$comp) + coord_fixed() +
-       theme_bw(base_size = 6) + geom_abline(intercept = 0, slope = 1, colour = 'red'))
-
-pdf(paste('Radica_S1vsS2_', dat, '.pdf', sep =''))
-marrangeGrob(grobs = ps$plots, nrow = 4, ncol = 4)
-dev.off()
 
 #
 
@@ -226,8 +215,12 @@ dev.off()
 
 # IMPUTATION
 # specify dataset for analysis
-df <- b1_all_f
+df <- b2_all_f
 rownames(df) <- df$Sample
+
+#
+#
+#
 
 # examine colinearity of VOC log peak areas
 cor_vals <- cor(log(df[,-c(1:5)]), use = 'pairwise.complete.obs')
@@ -239,11 +232,13 @@ assay <- function(x){
   df %>% filter(class == x) %>% dplyr::select(6:ncol(.))
 }
 
-assay_blank <- assay('Blank')
-assay_es <- assay('ES')
+# 
+assay_blank <- assay('Blank') %>% filter(rownames(.) %ni% '200131_RaDICA_Batch372_tracker_497813_1') # B1 poor quality blank sample
+assay_es <- assay('ES') 
 assay_bg <- assay('BG')
 assay_s1 <- assay('S1')
 assay_s2 <- assay('S2')
+
 
 # use GMSimpute (two-step Lasso) 
 impute <- function(x){
@@ -274,7 +269,12 @@ s2_impL <- imp_long(assay_s2_imp)
 
 b_imp_L <- rbind(es_impL, blank_impL, bg_impL, s1_impL, s2_impL) 
 
+#
+#
+#
+
 # change new object name accordingly
+b1_imp <- b_imp_L %>% pivot_wider(names_from = comp, values_from = peakArea)
 b2_imp <- b_imp_L %>% pivot_wider(names_from = comp, values_from = peakArea)
 
 write.csv(b1_imp, 'RADicA_B1_NAfiltered_imputed.csv')
@@ -289,7 +289,7 @@ write.csv(b2_imp, 'RADicA_B2_NAfiltered_imputed.csv')
 # EFFECT OF IMPUTATION ON DATA
 # specify dataset for analysis
 b_imp <- b2_imp %>% as.data.frame()
-b_all_f <- b2_all_f
+b_all_f <- b2_all_f  %>% filter(Sample %ni% '200131_RaDICA_Batch372_tracker_497813_1')
 dat <- 'B2'
 
 # change data format to long
@@ -341,7 +341,6 @@ time_plot <-
   facet_wrap(~ class, scale = 'free') +
   ylab('median log( Peak area)') 
 
-dev.new()
 time_plot
 
 ggsave(paste('Time_imputed_', dat, '.tiff', sep =''), time_plot, dpi = 300, units = 'mm', width = 240, height = 120)
@@ -368,6 +367,7 @@ std <- c('Acetone', 'Isoprene', 'Benzene', 'X3_Pentanone', 'X1.4_dioxane',
 
 b_blank_f_c <- complete_set(b_all_f, b_all_fL, 'Blank')
 b_es_f_c <- b_all_f %>% filter(class == 'ES') %>% subset(select = colnames(.) %in% std) # for ES use spike-in data only
+b_es_f_c <- complete_set(b_all_f, b_all_fL, 'ES')
 b_bg_f_c <- complete_set(b_all_f, b_all_fL, 'BG')
 b_s1_f_c <- complete_set(b_all_f, b_all_fL, 'S1')
 b_s2_f_c <- complete_set(b_all_f, b_all_fL, 'S2')
@@ -387,7 +387,6 @@ b_s1_f <- b_all_f %>% filter(class == 'S1')
 b_s2_f <- b_all_f %>% filter(class == 'S2') 
 
 #
-library(mixOmics)
 
 plot_pca <- function(x, y, z){
   pca <- mixOmics::pca(log(x), scale = TRUE, center = TRUE)
@@ -405,8 +404,8 @@ plot_pca <- function(x, y, z){
 pc_blank_c <- plot_pca(b_blank_f_c, b_blank_f, 'Blank')
 pc_blank_i <- plot_pca(b_imp_blank, b_blank_f, 'Blank')
 
-pc_es_c <- plot_pca(b_es_f_c[-c(5, 34, 53, 71),], b_es_f[-c(5, 34, 53, 71),], 'ES')
-pc_es_i <- plot_pca(b_imp_es[-c(5, 34, 53, 71),], b_es_f[-c(5, 34, 53, 71),], 'ES')
+pc_es_c <- plot_pca(b_es_f_c, b_es_f, 'ES')
+pc_es_i <- plot_pca(b_imp_es, b_es_f, 'ES')
 
 pc_bg_c <- plot_pca(b_bg_f_c, b_bg_f, 'BG')
 pc_bg_i <- plot_pca(b_imp_bg, b_bg_f, 'BG')
@@ -474,11 +473,15 @@ dev.off()
 s_tech1 <- s_tech %>% filter(techNA == 'Missing1')
 s_tech_imp1 <- s_tech_imp %>% filter(techNA == 'Missing1')
 
-View(s_tech1 %>% group_by(Sample) %>% summarise(n = n()))
+nas <- s_tech1 %>% group_by(Sample) %>% summarise(n = n())
+
+# exclude comparisons with < 10 observations 
+ncomp <- n_distinct(s_tech1$comp)-10
+nas1 <- nas %>% filter(nas$n < ncomp & nas$n> 10)
 
 # Wilcoxon paired test
 imp_test <- 
-  sapply(unique(s_tech1$Sample), function(id){ 
+  sapply(nas1$Sample, function(id){ 
   subset <- s_tech1 %>%
     filter(Sample == id) %>%
     pivot_longer(cols = c(S1, S2), names_to = 'Replicate', values_to = 'peakArea')
@@ -499,8 +502,8 @@ imp_test_df <- imp_test %>% t() %>% as.data.frame() %>%
          n = unlist(n),
          adj.p = p.adjust(p, method = 'BH')) 
 
-
-write.csv(imp_test_df, 'Wilcox_paired_breath_imputedVSobserved_B2.csv')
+# edit file name accordingly
+write.csv(imp_test_df, 'Wilcox_paired_breath_imputedVSobserved_B1.csv')
 
 #
 #

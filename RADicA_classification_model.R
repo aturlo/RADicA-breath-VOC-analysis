@@ -1,5 +1,12 @@
 ## Predicting asthma based on breath VOC samples
 
+# author: Aggie Turlo
+# project: RADicA
+# date: 10/02/2025
+
+#####################
+
+
 library(dplyr)
 library(tidyr)
 library(ggplot2)
@@ -11,35 +18,26 @@ library(forcats)
 library(irr)
 library(ggcorrplot)
 
-# load summarised BG corrected dataset 
-b1_imp_sum_corr_w <- read.csv('RADicA_BG_adjusted.csv')[,-1]
+# load data
+# load summarised BG corrected datasets 
+b1_corr_w <- read.csv('RADicA_B1_BG_adjusted.csv')[,-1]
+b2_corr_w <- read.csv('RADicA_B2_BG_adjusted.csv')[,-1]
 
-# w/o multivariate outliers
-b1_corr_w1 <- read.csv('RADicA_BG_adjusted_B1_outl_removed.csv')[,-1]
-b_corr_w1 <- read.csv('RADicA_BG_adjusted_B2_outl_removed.csv')[,-1]
+# load summarised BG corrected datasets w/o multivariate outliers
+b1_corr_out <- read.csv('RADicA_BG_adjusted_B1_outl_removed.csv')[,-1]
+b2_corr_out <- read.csv('RADicA_BG_adjusted_B2_outl_removed.csv')[,-1]
 
-# set columns in the same order
-b1_corr_w1 <- b1_corr_w1[names(b_corr_w1)]
-
-#
-b1_corr_w1 <- b1_corr_w1 %>% dplyr::select(!'X2_butanone')
-write.csv(b1_corr_w1, 'RADicA_BG_adjusted_B1_outl_removed.csv')
-b_corr_w1 <- b_corr_w1 %>% dplyr::select(!'X2_butanone')
-write.csv(b_corr_w1, 'RADicA_BG_adjusted_B2_outl_removed.csv')
-#
-
+# load metadata
 meta <- read.csv('Radica sample filenames aligned with clinical metadata.csv')[,-1]
 
-reg_valid_join <- read.csv('RegValid_results.csv')[,-1]
+# load VOC origin annotation based on logFC analysis
+endo_exo <- endo_exo <- read.csv('Endo_Exo_filters.csv')[,-1] 
 
-endo <- reg_valid_join %>% filter(FC_filter != 'Exo') %>%
-  filter(comp != 'Phenylethyne')
+#
 
-b1_endo <- b1_corr_w1 %>% dplyr::select(1:4, endo$comp) 
-b2_endo <- b_corr_w1 %>% dplyr::select(1:4, endo$comp)
-
-n_distinct(b_corr_w1$Sample)
-n_distinct(b1_corr_w1$Sample)
+# data formatting
+# set columns in the same order
+b1_corr_out <- b1_corr_out[names(b2_corr_out)]
 
 #
 #
@@ -104,53 +102,114 @@ cp2 <- ggcorrplot(cor_b2, lab = FALSE, hc.method = 'ward.D2', hc.order = TRUE,
   ggtitle('Dataset 2 breath VOC correlation matrix')
 ggsave('B2_correlation_plot.tiff', cp2, dpi = 300, unit = 'mm', width = 150, height = 150)
 
-# retrieve hierarchical clusters
-hc1 <- hclust(dist(cor_b1), method = 'ward.D2')
-dev.new()
-plot(hc1, cex = 0.5)
-hc1_cut <- cutree(hc1, h = 5)
-n_distinct(hc1_cut)
-
-write.csv(hc1_cut, 'VOC_corr_hclust_B1.csv')
-
-hc2 <- hclust(dist(cor_b2), method = 'ward.D2')
-dev.new()
-plot(hc2, cex = 0.5)
-hc2_cut <- cutree(hc2, h = 5)
-n_distinct(hc2_cut)
-
-write.csv(hc2_cut, 'VOC_corr_hclust_B2.csv')
-
-names(hc1_cut) <- vocs
-names(hc2_cut) <- vocs
-
-# number of variables overlapping between clusters
-hc_ag <- matrix(nrow = 11, ncol = 10)
-
-for(n in 1:10){
-  for(i in 1:11) {
-    agreement <- intersect(names(hc1_cut[hc1_cut == i]), names(hc2_cut[hc2_cut == n]))
-    print(n_distinct(agreement))
-    hc_ag[i,n] <- n_distinct(agreement)
-    }
-  }
-
-reg_valid_join %>% filter(model == 'Model1') %>%
-  left_join(as.data.frame(vocs) %>% mutate(VN = rownames(.)) %>% rename(comp = vocs)) %>%
-  filter(comp %in% intersect(names(hc1_cut[hc1_cut == 7]), names(hc2_cut[hc2_cut == 4]))) %>%
-  dplyr::select(c(sign, wilcox_filter, FC_filter, comp, VN))
 
 
 #
 #
 #
+
+# examine reproducibility of VOC levels across time points
+library(irr)
+
+data <- b2_corr_out
+vocs <- colnames(data)[-c(1:4)]
+
+icc_b2 <- bind_rows(lapply(vocs, function(voc){
+  input <-  data %>%
+    pivot_longer(cols =! c(1:4), names_to = 'comp', values_to = 'peakArea') %>%
+    filter(comp == voc) %>%
+    dplyr::select(!Sample) %>%
+    pivot_wider(names_from = CoreVisit, values_from = peakArea) %>%
+    as.data.frame()
+  
+  rownames(input) <- input$RAD_ID
+  input <- input[,c(4:5)]
+  
+  icc_res <- icc(input, model = 'twoway', type = 'consistency', unit = 'single') #columns and rows random
+  output <- data.frame(comp = voc, 
+                       ICC = icc_res$value, 
+                       p.value = icc_res$p.value,
+                       CI_lwr = icc_res$lbound, CI_upr = icc_res$ubound)
+  
+})) 
+
+
+icc_b1 <- icc_b1 %>% mutate(adj.p.value = p.adjust(p.value, method = 'BH'))
+icc_b1_f <- icc_b1 %>% filter(adj.p.value < 0.05)
+hist(icc_b1$ICC)
+quantile(icc_b1$ICC)
+
+icc_b2 <- icc_b2 %>% mutate(adj.p.value = p.adjust(p.value, method = 'BH'))
+icc_b2_f <- icc_b2 %>% filter(adj.p.value < 0.05)
+hist(icc_b2$ICC)
+quantile(icc_b2$ICC)
+
+write.csv(icc_b1, 'ICC_CoreVisits_B1.csv')
+write.csv(icc_b2 , 'ICC_CoreVisits_B2.csv')
+
+icc_b1 <- read.csv('ICC_CoreVisits_B1.csv')[,-1]
+icc_b2 <- read.csv('ICC_CoreVisits_B2.csv')[,-1]
+
+icc_b1 <- icc_b1 %>%
+  mutate(adj.p.value = p.adjust(p.value, method = 'BH')) 
+
+icc_b2 <- icc_b2 %>%
+  mutate(adj.p.value = p.adjust(p.value, method = 'BH'))
+
+hist(icc_b2$ICC, breaks = 8)
+
+icc_b12 <- icc_b1 %>% mutate(dataset = 'B1') %>%
+  rbind(icc_b2 %>% mutate(dataset = 'B2'))
+
+icc_b12w <- icc_b12 %>% 
+  pivot_wider(names_from = dataset, 
+              values_from = c(ICC, p.value, adj.p.value, CI_lwr, CI_upr)) %>%
+  mutate(p.value = ifelse(p.value_B1 < 0.05 & p.value_B2 < 0.05, 'both', 
+                          ifelse(p.value_B1 > 0.05 & p.value_B2 > 0.05, 'neither' ,' one'))) %>%
+  mutate(adj.p.value = ifelse(adj.p.value_B1 < 0.05 & adj.p.value_B2 < 0.05, 'both', 
+                              ifelse(adj.p.value_B1 > 0.05 & adj.p.value_B2 > 0.05, 'neither' ,' one'))) %>%
+  mutate(CI_lwr = ifelse(CI_lwr_B1 > 0 & CI_lwr_B2 > 0, 'both', 
+                         ifelse(CI_lwr_B1 < 0 & CI_lwr_B2 < 0, 'neither' ,' one')))
+
+
+icc_p <- icc_b12w %>% 
+  dplyr::select(ICC_B1, ICC_B2, p.value, adj.p.value, CI_lwr) %>%
+  pivot_longer(cols = c(p.value, adj.p.value, CI_lwr), 
+               names_to = 'para', values_to = 'outcome') 
+
+icc_p$para <- as.factor(icc_p$para)
+levels(icc_p$para) <- c('adj.p.value < 0.05',
+                        '95_CI_lwr > 0',
+                        'p.value < 0.05')
+icc_p$para <- factor(icc_p$para, levels = c('95_CI_lwr > 0',
+                                            'p.value < 0.05',
+                                            'adj.p.value < 0.05'))
+
+icc_p %>%
+  ggplot(aes(x = ICC_B1, y = ICC_B2)) +
+  facet_wrap(~para, ncol = 3) +
+  geom_point(aes(colour = outcome)) +
+  scale_colour_brewer(palette = 'Set2') +
+  geom_abline(intercept = 0, slope = 1, colour = 'gray33') +
+  theme_bw() +
+  ggtitle('Intraclass Correlation Coefficient of breath VOCs between Core Visits')
+
+icc_p
+
+ggsave('ICC_CV_B1B2.tiff', unit = 'mm', dpi = 300, width = 205, height = 80)
+
+#
+#
+#
+
+###############################
 
 # MINT
-rownames(b1_corr_w1) <- b1_corr_w1$Sample
+rownames(b1_corr_out) <- b1_corr_out$Sample
 
-X <- b1_corr_w1[,-c(1:4)]
-Y <- b1_corr_w1$Diagnosis
-study <- b1_corr_w1$CoreVisit
+X <- b1_corr_out[,-c(1:4)]
+Y <- b1_corr_out$Diagnosis
+study <- b1_corr_out$CoreVisit
 
 study[study == 'CV1'] <- 1
 study[study == 'CV2'] <- 2
@@ -158,11 +217,13 @@ study[study == 'CV2'] <- 2
 study <- as.factor(study)
 
 set.seed(1410)
-base <- mint.plsda(X, Y, study = study, ncomp = 1, scale = TRUE)
+base1 <- mint.plsda(X, Y, study = study, ncomp = 1, scale = TRUE)
 base$prop_expl_var$X
 
-# 1 component
 # global variates
+cols1 <- hue_pal()(8)
+swatch(cols1)
+
 plot_variates <- function(model, variates, data) {
   smint_scores <- variates %>% as.data.frame() %>% mutate(Sample = rownames(.)) %>%
   left_join(data %>% dplyr::select(Sample, Diagnosis, CoreVisit))
@@ -173,8 +234,8 @@ plot_variates <- function(model, variates, data) {
   geom_boxplot(outliers = FALSE) +
   geom_jitter(size = 1, alpha = 0.7) +
   theme_bw(base_size = 10) +
-  scale_fill_manual(values = c('Not Asthma' = 'darkorange1',
-                               'Asthma' = 'dodgerblue2')) +
+  scale_fill_manual(values = c('Asthma' = cols1[2],
+                                     'Not Asthma' = cols1[6])) +
   ylab(paste('Component 1 (', round(as.numeric(model$prop_expl_var$X[3])*100, 2), '% )')) +
   ggtitle('Global scores plot') +
   theme(plot.title =  element_text(hjust = 0.5))
@@ -182,8 +243,7 @@ plot_variates <- function(model, variates, data) {
   print(sp1)
 }
 
-sp1 <- plot_variates(base$variates$X, b_corr_w1)
-sp1_b1 <- plot_variates(base1$variates$X, b1_corr_w1)
+sp1 <- plot_variates(base, base$variates$X, b2_corr_out)
 
 # partial variates    
 plot_variates_part <- function(variates, data) {
@@ -198,15 +258,14 @@ plot_variates_part <- function(variates, data) {
     geom_jitter(size = 1, alpha = 0.7) +
     theme_bw(base_size = 10) +
     facet_wrap(~ CoreVisit) +
-    scale_fill_manual(values = c('Not Asthma' = 'darkorange1',
-                                 'Asthma' = 'dodgerblue2')) +
+    scale_fill_manual(values = c('Asthma' = cols1[2],
+                                     'Not Asthma' = cols1[6])) +
     ggtitle('Partial scores plots') +
     theme(plot.title =  element_text(hjust = 0.5)) +
     ylab('Component 1')
 }
 
-sp2 <- plot_variates_part(base$variates.partial$X, b_corr_w1)
-sp2_b1 <- plot_variates_part(base1$variates.partial$X, b1_corr_w1)
+sp2 <- plot_variates_part(base$variates.partial$X, b2_corr_out)
   
 sp <-  plot_grid(sp1, sp2, nrow = 2)
 sp
@@ -249,7 +308,7 @@ er_fun(conf_mat)
 
 # create M-fold cross-validation method for final MINT model
 # preserve all observations from one patient in either train or held-out fold
-data <- b1_corr_w1
+data <- b2_corr_out
 
 set.seed(1410)
 
@@ -269,9 +328,11 @@ cv_perf <-
     for (m in as.character(0:(levels - 1))) {
       test_id <- folds[[m]]
       test_data <- data %>% filter(RAD_ID %in% names(test_id)) %>%
-        mutate(study = '3')
+        mutate(study = '3') %>%
+        relocate(study)
       train_data <- data %>% filter(RAD_ID %ni% names(test_id)) %>%
-        mutate(study = ifelse(CoreVisit == 'CV1', '1', '2'))
+        mutate(study = ifelse(CoreVisit == 'CV1', '1', '2')) %>%
+        relocate(study)
       conc_data <- rbind(test_data, train_data) %>%
         relocate(study)
       study <- as.factor(conc_data$study)
@@ -284,6 +345,7 @@ cv_perf <-
                             newdata = X[test,],
                             dist = 'max.dist',
                             study.test = factor(study[test]))
+
       # for subject-level prediction use code below
       #cv_pred <- cbind(test_data$RAD_ID, as.data.frame(model_pred[["predict"]])) %>%
       #rename(RAD_ID = 'test_data$RAD_ID',
@@ -516,10 +578,10 @@ ggsave('sMINT_tuning_var_number_test_B1.tiff', unit = 'mm', dpi = 300, width = 1
 # CV for AUROC calculation
 set.seet(1410)
 
-data <- b_corr_w1
+data <- b2_corr_w1
 
 auc_perf <- 
-  replicate(n = 1000, expr = {
+  replicate(n = 100, expr = {
     p <- n_distinct(data$RAD_ID)
     x <- sample(1:p)
     names(x) <- unique(data$RAD_ID)
@@ -608,7 +670,7 @@ rep_SenSpec %>%
 ggplot(aes(x = fpr, y = Sen, group = rep_fold)) +
   scale_x_reverse() +
   geom_step(colour = 'gray40', size = 0.1) + 
-  geom_abline(aes(intercept = 0, slope = -1), colour = 'grey90', alpha = 0.6, linewidth = 0.5) +
+  geom_abline(aes(intercept = 0, slope = -1), colour = 'black', alpha = 1, linewidth = 1) +
   theme_bw() +
   coord_fixed(xlim=c(0,1), ylim=c(0,1)) +
   ylab('Sensitivity') +
@@ -741,8 +803,8 @@ plsda_pred_vals %>%
 #
 
 # test MINT on Dataset 1
-train <- b1_corr_w1
-test_b1_df <- b_corr_w1 %>% filter(CoreVisit == 'CV2') %>%
+train <- b2_corr_out
+test_b1_df <- b1_corr_out %>% #filter(CoreVisit == 'CV2') %>%
   mutate(CoreVisit = 'B1_CV')
 
 conc_corr_w1 <- rbind(train, test_b1_df)
@@ -768,12 +830,35 @@ base <- mint.plsda(X = X[-c(test_b1),],
 
 mint_pred_b1 <- predict(base,
                         newdata = X[test_b1,],
-                        dist = 'centroids.dist',
+                        dist = 'max.dist',
                         study.test = factor(study[test_b1]))
 
+# predict training dataset
+mint_pred_train <- predict(base,
+                        newdata = X,
+                        dist = 'max.dist',
+                        study.test = study)
+
+
+dummy_pred_int <- mint_pred_train[['predict']][,,1]
+pred_class_train_int <- mint_pred_train[["class"]][["max.dist"]] %>% as.data.frame() 
+
+conf_mat <- table(factor(b2_corr_out$Diagnosis, levels = levels(as.factor(b2_corr_out$Diagnosis))), 
+                  pred_class_train_int$comp1)
+
+roc_train_mint <- roc(response = b2_corr_out$Diagnosis, predictor = dummy_pred_int[,2])
+plot(roc_train_mint, legacy.axes = TRUE, main = 'Training dataset') 
+out_roc_b1_mint <- roc_b1_mint[['sensitivities']] %>% cbind(roc_b1_mint[['specificities']],
+                                                            roc_b1_mint[['thresholds']]) %>%
+  as.data.frame()
+colnames(out_roc_b1_mint) <- c('Sens', 'Spec', 'Thresh')
+auc(roc_train_mint)
+
+
 #
+
 dummy_pred_b1_int <- mint_pred_b1[['predict']][,,1]
-pred_class_b1_int <- mint_pred_b1[["class"]][["centroids.dist"]] %>% as.data.frame() 
+pred_class_b1_int <- mint_pred_b1[["class"]][["max.dist"]] %>% as.data.frame() 
 
 conf_mat <- table(factor(test_b1_df$Diagnosis, levels = levels(as.factor(test_b1_df$Diagnosis))), 
                   pred_class_b1_int$comp1)
@@ -785,8 +870,21 @@ ber_fun(conf_mat)
 sens_fun(conf_mat)
 spec_fun(conf_mat)
 
+# agreement between core visits
+pred_class_b1_int <- pred_class_b1_int %>% mutate(Sample = rownames(.)) %>%
+  left_join(b1_corr_out %>% dplyr::select(RAD_ID, Sample, CoreVisit))
+
+pred_class_ag <- pred_class_b1_int %>%
+  dplyr::select(!Sample) %>%
+  pivot_wider(names_from = CoreVisit, values_from = comp1) %>%
+  mutate(agr = ifelse(CV1 == CV2, 'yes', 'no'))
+  
+table(pred_class_ag$agr)
+  
+#  
+
 roc_b1_mint <- roc(response = test_b1_df$Diagnosis, predictor = dummy_pred_b1_int[,2])
-plot(roc_b1_mint, legacy.axes = TRUE)
+plot(roc_b1_mint, legacy.axes = TRUE, main = 'Test dataset')
 out_roc_b1_mint <- roc_b1_mint[['sensitivities']] %>% cbind(roc_b1_mint[['specificities']],
                                               roc_b1_mint[['thresholds']]) %>%
   as.data.frame()
@@ -935,15 +1033,14 @@ loads_glob1_sum <- loads_glob1 %>% group_by(comp1_class, FC_filter) %>% summaris
          model = 'global')
 
 #
-loads_glob_b1 <- base1$loadings$X %>% as.data.frame() %>%
+loads_glob_b1 <- base$loadings$X %>% as.data.frame() %>%
   mutate(comp = rownames(.)) %>% 
-  left_join(reg_valid_join %>% dplyr::select(comp, sign)) %>%
-  left_join(endo_exo %>% dplyr::select(comp, FC_filter)) %>%
+  left_join(endo_exo %>% dplyr::select(comp, adj, FC_filter)) %>%
   distinct()
 
 
-loads_glob_b11 <- loads_glob_b1 %>% arrange(desc(abs(comp1))) %>%
-  slice(1:42) %>% mutate(comp1_class = ifelse(comp1 > 0, 'pos', 'neg')) 
+loads_glob_b11 <- loads_glob_b1 %>% arrange(desc(abs(comp1))) %>% 
+  mutate(comp1_class = ifelse(comp1 > 0, 'pos', 'neg')) 
 
 loads_glob_b11_sum <- loads_glob_b11 %>% group_by(comp1_class, FC_filter) %>% summarise(n = n()) %>%
   mutate(ratio = ifelse(comp1_class == 'pos', n/table(loads_glob_b11$comp1_class)[2], 
@@ -958,34 +1055,32 @@ loads_part <- base$loadings.partial$X %>% as.data.frame() %>%
   rename(CV1_comp1 = comp1,
          CV2_comp1 = comp1.1) 
 
-loads_part1_cv1 <- loads_part %>% 
-  left_join(reg_valid_join %>% dplyr::select(comp, sign)) %>%
+loads_part_b11_cv1 <- loads_part %>% 
   left_join(endo_exo %>% dplyr::select(comp, FC_filter)) %>%
   distinct() %>% arrange(desc(abs(CV1_comp1))) %>%
   slice(1:46) %>% 
   mutate(comp1_class = ifelse(CV1_comp1 > 0, 'pos', 'neg')) 
   
-loads_part1_cv1_sum <- loads_part_b11_cv1 %>% group_by(comp1_class, FC_filter) %>% summarise(n = n()) %>%
+loads_part_b11_cv1_sum <- loads_part_b11_cv1 %>% group_by(comp1_class, FC_filter) %>% summarise(n = n()) %>%
   mutate(ratio = ifelse(comp1_class == 'pos', n/table(loads_part_b11_cv1$comp1_class)[2], 
                         n/table(loads_part_b11_cv1$comp1_class)[1]),
          model = 'partial_cv1') 
   
 # visualise VOC classes among most important loadings
-loads_glob1_sum %>% rbind(loads_part_b11_cv1_sum, loads_part_b11_cv2_sum) %>%
+loads_glob_b11_sum %>% #rbind(loads_part_b11_cv1_sum, loads_part_b11_cv2_sum) %>%
   mutate(FC_filter = ifelse(is.na(FC_filter), 'Unknown', FC_filter)) %>%
   ggplot(aes(x = comp1_class, y = ratio, fill = FC_filter)) +
-  facet_wrap(~model) +
   #geom_col(position = position_dodge(preserve = 'single')) +
   geom_col() +
-  scale_fill_brewer(palette = 'Set2') +
   theme_bw() +
   xlab('') +
   scale_x_discrete(labels = c('neg' = 'comp1 < 0',
                               'pos' = 'comp1 > 0')) +
   ggtitle('Classification of component 1 loadings (Dataset 1)') +
-  ylab('')
+  ylab('') +
+  theme(legend.position = 'none')
 
-ggsave('Bar_plot_class_loadings_B1.tiff', unit = 'mm', dpi = 300, width = 170, height = 80)
+ggsave('Bar_plot_class_loadings_B2.tiff', unit = 'mm', dpi = 300, width = 60, height = 80)
 
 # variable importance
 loads_vip_b <- vip(base) %>% as.data.frame()
@@ -1005,23 +1100,24 @@ top_stab <- vocs_perf_base %>% filter(stab > 0.7)
 #
 #
 
-Lglob1 <- loads_glob %>% 
-  mutate(sign = ifelse(is.na(sign), 'no', sign)) %>%
+Lglob1 <- loads_glob_b1 %>% 
+  #mutate(sign = ifelse(is.na(sign), 'no', sign)) %>%
   #left_join(icc_b12w %>% dplyr::select(comp, ICC_B2, CI_lwr_B2)) %>%
   #mutate(ICC_B2 = ifelse(ICC_B2 < 0, 0, ICC_B2),
    #      sign_icc = ifelse(CI_lwr_B2 < 0, 'no', 'yes'),
     #     comp = str_trunc(comp, 33)) %>%
-  rename(BG_corr = sign) %>%
+  rename(BG_corr = adj) %>%
   arrange(desc(abs(comp1))) %>% 
-  slice(1:50) %>% 
+  #slice(1:20) %>% 
+  mutate(comp = str_sub(comp, end = 34)) %>%
   ggplot(aes(x = comp1, y = fct_inorder(as.factor(comp)), 
              #fill = ICC_B1,
              fill = FC_filter,
-             colour = BG_corr
              #colour = sign_icc
-             )) + 
+             )) +
   geom_col() +
-  scale_fill_brewer(palette = 'Set2') +
+  #geom_col_pattern(aes(pattern = BG_corr)) +
+  scale_pattern_manual(values = c('yes' = 'stripe', 'no' = NA)) +
   theme_bw() +
   #scale_fill_viridis_b(limits = c(0, 0.7)) +
   theme(axis.title.y = element_blank())
@@ -1030,7 +1126,7 @@ Lglob1
 
 Lglob1 + ggtitle('Global loadings')
 
-ggsave('MINT_global_loadings_VS.tiff', dpi = 300, unit = 'mm', width = 135, height = 155)
+ggsave('MINT_global_loadings_B1_VS.tiff', dpi = 300, unit = 'mm', width = 140, height = 110)
 
 Lglob2
 
@@ -1044,20 +1140,14 @@ ggsave('MINT_global_loadings_B1.tiff', Lglob, unit = 'mm', dpi = 300, width = 24
 dev.new()
 
 Lpart11 <- loads_part %>% 
-  left_join(reg_valid_join %>% dplyr::select(comp, sign)) %>%
-  left_join(endo_exo_2 %>% dplyr::select(comp, FC_filter)) %>%
+  left_join(endo_exo %>% dplyr::select(comp, FC_filter)) %>%
   distinct() %>%
-  left_join(icc_b12w %>% dplyr::select(comp, ICC_B2, CI_lwr_B2)) %>%
-  mutate(ICC_B2 = ifelse(ICC_B2 < 0, 0, ICC_B2),
-         sign_icc = ifelse(CI_lwr_B2 < 0, 'no', 'yes'),
-         comp = str_trunc(comp, 33)) %>%
-  rename(BG_corr = sign) %>%
   arrange(desc(abs(CV1_comp1))) %>% 
-  slice(1:46) %>% 
+  slice(1:20) %>% 
   ggplot(aes(x = CV1_comp1, y = fct_inorder(as.factor(comp)), 
              #fill = ICC_B1,
              fill = FC_filter,
-             colour = BG_corr
+             #colour = BG_corr
              #colour = sign_icc
   )) + 
   geom_col() +
@@ -1933,82 +2023,6 @@ ber_fun(conf_mat)
 #
 #
 
-# examine reproducibility of VOC levels across time points
-data <- b_corr_w1
-vocs <- colnames(b_corr_w1)[-c(1:4)]
-
-icc_b2 <- bind_rows(lapply(vocs, function(voc){
-  input <-  data %>%
-    pivot_longer(cols =! c(1:4), names_to = 'comp', values_to = 'peakArea') %>%
-    filter(comp == voc) %>%
-    dplyr::select(!Sample) %>%
-    pivot_wider(names_from = CoreVisit, values_from = peakArea) %>%
-    as.data.frame()
-  
-  rownames(input) <- input$RAD_ID
-  input <- input[,c(4:5)]
-  
-  icc_res <- icc(input, model = 'twoway', type = 'consistency', unit = 'single') #columns and rows random
-  output <- data.frame(comp = voc, 
-                       ICC = icc_res$value, 
-                       p.value = icc_res$p.value,
-                       CI_lwr = icc_res$lbound, CI_upr = icc_res$ubound)
-  
-})) 
-
-write.csv(icc_b1, 'ICC_CoreVisits_B1.csv')
-write.csv(icc_b2 , 'ICC_CoreVisits_B2.csv')
-
-icc_b1 <- read.csv('ICC_CoreVisits_B1.csv')[,-1]
-icc_b2 <- read.csv('ICC_CoreVisits_B2.csv')[,-1]
-
-icc_b1 <- icc_b1 %>%
-  mutate(adj.p.value = p.adjust(p.value, method = 'BH')) 
-
-icc_b2 <- icc_b2 %>%
-  mutate(adj.p.value = p.adjust(p.value, method = 'BH'))
-
-hist(icc_b2$ICC, breaks = 8)
-
-icc_b12 <- icc_b1 %>% mutate(dataset = 'B1') %>%
-  rbind(icc_b2 %>% mutate(dataset = 'B2'))
-
-icc_b12w <- icc_b12 %>% 
-  pivot_wider(names_from = dataset, 
-              values_from = c(ICC, p.value, adj.p.value, CI_lwr, CI_upr)) %>%
-  mutate(p.value = ifelse(p.value_B1 < 0.05 & p.value_B2 < 0.05, 'both', 
-                          ifelse(p.value_B1 > 0.05 & p.value_B2 > 0.05, 'neither' ,' one'))) %>%
-  mutate(adj.p.value = ifelse(adj.p.value_B1 < 0.05 & adj.p.value_B2 < 0.05, 'both', 
-                          ifelse(adj.p.value_B1 > 0.05 & adj.p.value_B2 > 0.05, 'neither' ,' one'))) %>%
-  mutate(CI_lwr = ifelse(CI_lwr_B1 > 0 & CI_lwr_B2 > 0, 'both', 
-                              ifelse(CI_lwr_B1 < 0 & CI_lwr_B2 < 0, 'neither' ,' one')))
-
-
-icc_p <- icc_b12w %>% 
-  dplyr::select(ICC_B1, ICC_B2, p.value, adj.p.value, CI_lwr) %>%
-  pivot_longer(cols = c(p.value, adj.p.value, CI_lwr), 
-               names_to = 'para', values_to = 'outcome') 
-
-icc_p$para <- as.factor(icc_p$para)
-levels(icc_p$para) <- c('adj.p.value < 0.05',
-                        '95_CI_lwr > 0',
-                        'p.value < 0.05')
-icc_p$para <- factor(icc_p$para, levels = c('95_CI_lwr > 0',
-                                            'p.value < 0.05',
-                                            'adj.p.value < 0.05'))
-
-icc_p %>%
-  ggplot(aes(x = ICC_B1, y = ICC_B2)) +
-  facet_wrap(~para, ncol = 3) +
-  geom_point(aes(colour = outcome)) +
-  scale_colour_brewer(palette = 'Set2') +
-  geom_abline(intercept = 0, slope = 1, colour = 'gray33') +
-  theme_bw() +
-  ggtitle('Intraclass Correlation Coefficient of breath VOCs between Core Visits')
-
-icc_p
-
-ggsave('ICC_CV_B1B2.tiff', unit = 'mm', dpi = 300, width = 205, height = 80)
 
 # Ratio of endo- to exogenous VOCs in breath samples
 endo_exo <- read.csv('Endo_Exo_filters.csv')[,-1]

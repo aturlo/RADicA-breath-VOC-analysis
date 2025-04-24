@@ -2,7 +2,7 @@
 
 # author: Aggie Turlo
 # project: RADicA
-# date: 30/09/2024
+# date: 27/01/2025
 
 #####################
 
@@ -21,287 +21,54 @@ library(stringr)
 library(insight)
 library(performance)
 library(pcaPP)
+library(clusrank)
+library(performance)
+library(forcats)
+library(ggrepel)
+library(VennDiagram)
+library(shades)
 
+## load data
 # load normalised dataset with summarised breath samples
-b1_imp_sum_c <- read.csv('RADicA_B1_NAfiltered_imputed_CC2_PQN_summarised.csv')[,-1]
-b_imp_sum_c <- read.csv('RADicA_B2_NAfiltered_imputed_CC2_PQN_summarised.csv')[,-1]
+b1_imp_sum <- read.csv('RADicA_B1_NAfiltered_imputed_CC2_PQN_summarised_BGfiltered.csv')[,-1]
+b2_imp_sum <- read.csv('RADicA_B2_NAfiltered_imputed_CC2_PQN_summarised_BGfiltered.csv')[,-1]
 
+b1_imp_sum$Analysis_date <- as.Date(b1_imp_sum$Analysis_date)
+b2_imp_sum$Analysis_date <- as.Date(b2_imp_sum$Analysis_date)
 
-pqn_imp_sum_c <- read.csv('RADicA_B1_NAfiltered_imputed_PQN_summarised_long_ICC_BGfiltered.csv')[,-1] %>%
-  filter(CoreVisit %in% c('CV1', 'CV2'))
-
+# load metadata
 meta <- read.csv('Radica sample filenames aligned with clinical metadata.csv')
 
 meta$Analysis_date <- as.Date(meta$Analysis_date, format = '%d/%m/%Y')
 
+# load list of outliers in background-breath linear model (dataset 2)
 infl_obs <- read.csv('Deletion_diagnostics_formatted_B2.csv')[,-1]
 
+# load VOC annotation based on logFC filtering
+endo_exo <- read.csv('Endo_Exo_filters.csv')[,-1]
+
+# custom functions
+'%ni%' <- Negate('%in%')
+
+
 #
 #
 #
 
-# plot S vs BG log abundances
-bg_s_plot <- function(df) {
-  lapply(unique(df$comp), function(voc) {
-    subset <- df %>% filter(comp == voc) %>%
-      mutate(logS = log(S), logBG = log(BG)) %>%
-      #filter(Sample %ni% c('190903_RaDICA_RAD032')) %>%
-      filter(CoreVisit %in% c('CV1', 'CV2'))
-    
-    plot <- ggplot(data = subset, 
-                   aes(x = logBG, y = logS)) + #colour = as.factor(Diagnosis))) +
-      geom_point(alpha = 0.6, size = 1, aes(colour = as.factor(Diagnosis))) + 
-      ggtitle(voc) +
-      theme_bw() +
-      theme(plot.title = element_text(size = 8),
-            legend.position = 'none') +
-      geom_smooth(method = 'lm', se = FALSE)
-  })
-}
-
-
-plots <- bg_s_plot(b_imp_sum_c)
-
-pdf('BGvsS_scatterPlots_PQN_CV12_BGfiltered_sign.pdf')
-marrangeGrob(plots1, nrow = 4, ncol = 4)
-dev.off()
 
 #############################
 
-# Filtering VOCs with similar BG and S distributions
-# B2 - exclude VOCs with missing BG data
-incomplete_s <- b_imp_sum_c[which(is.na(b_imp_sum_c$BG), arr.ind = TRUE),] 
-bg_mis <- unique(incomplete_s$comp)
-
-# Wilcoxon paired test for distribution of differences
-vocs1 <- unique(b1_imp_sum_c$comp)
-vocs <- vocs1[vocs1 %ni% bg_mis] # B2
-
-wilcox_bg_fun <- function(data, voc_list, CV) {
-  bind_rows(lapply(voc_list, function(voc) {
-  subset1 <- data %>% 
-    filter(comp == voc) %>%
-    filter(CoreVisit == CV) %>%
-    drop_na()
-  test <- wilcox.test(subset1$S, subset1$BG, paired = TRUE,)
-  df <- data.frame(comp = voc, 
-                   p.value = test[["p.value"]],
-                   min = min(subset1$S), 
-                   max = max(subset1$S),
-                   Q1 = quantile(subset1$S, 0.25), 
-                   Q3 = quantile(subset1$S, 0.75),
-                   logFC = mean(log(subset1$S) - mean(log(subset1$BG))))
-  }))
-  }
-
-
-wilcox_bg_bcv1 <- wilcox_bg_fun(b_imp_sum_c, vocs, 'CV1') %>% 
-  mutate(adj.p.value = p.adjust(p.value, method = 'BH'))
-
-wilcox_bg_bcv2 <- wilcox_bg_fun(b_imp_sum_c, vocs, 'CV2') %>% 
-  mutate(adj.p.value = p.adjust(p.value, method = 'BH'))
-
-wilcox_bg_bcv1_f <- wilcox_bg_bcv1 %>% filter(adj.p.value > 0.05)
-wilcox_bg_bcv2_f <- wilcox_bg_bcv2 %>% filter(adj.p.value > 0.05)
-
-wilcox_b_agreement <- intersect(wilcox_bg_bcv1_f$comp, wilcox_bg_bcv2_f$comp)
-
-View(wilcox_bg_bcv1 %>% filter(comp %ni% wilcox_b_agreement))
-
-endo_b_cv1 <- wilcox_bg_bcv1 %>% filter(comp %ni% wilcox_b_agreement) %>%
-  filter(logFC > 0.4)
-endo_b_cv2 <- wilcox_bg_bcv2 %>% filter(comp %ni% wilcox_b_agreement) %>%
-  filter(logFC > 0.4)
-
-cons_b <- intersect(endo_b_cv1$comp, endo_b_cv2$comp)
-setdiff(endo_b_cv1$comp, endo_b_cv2$comp)
-
-#
-
-wilcox_bg_b1cv1 <- wilcox_bg_fun(b1_imp_sum_c, vocs1, 'CV1') %>% 
-  mutate(adj.p.value = p.adjust(p.value, method = 'BH'))
-wilcox_bg_b1cv2 <- wilcox_bg_fun(b1_imp_sum_c, vocs1, 'CV2') %>% 
-  mutate(adj.p.value = p.adjust(p.value, method = 'BH'))
-
-wilcox_bg_b1cv1_f <- wilcox_bg_b1cv1 %>% filter(adj.p.value > 0.05)
-wilcox_bg_b1cv2_f <- wilcox_bg_b1cv2 %>% filter(adj.p.value > 0.05)
-
-wilcox_b1_agreement <- intersect(wilcox_bg_b1cv1_f$comp, wilcox_bg_b1cv2_f$comp)
-
-endo_b1_cv1 <- wilcox_bg_b1cv1 %>% filter(comp %ni% wilcox_b1_agreement) %>%
-  filter(logFC > 0.4)
-endo_b1_cv2 <- wilcox_bg_b1cv2 %>% filter(comp %ni% wilcox_b1_agreement) %>%
-  filter(logFC > 0.4)
-
-cons_b1 <- intersect(endo_b1_cv1$comp, endo_b1_cv2$comp)
-setdiff(endo_b1_cv1$comp, endo_b1_cv2$comp)
-
-intersect(cons_b, cons_b1)
-setdiff(cons_b1, cons_b)
-
-# define VOCs that need removing from the dataset due to similarity with BG
-
-all_vocs <- wilcox_bg_b1cv1$comp
-intersect(wilcox_b_agreement, wilcox_b1_agreement) # VOCs where null accepted in both CVs, both datasets
-setdiff(wilcox_b1_agreement, wilcox_b_agreement)
-
-keep_wilcox_min <- intersect(all_vocs[all_vocs %ni% wilcox_b_agreement], # remove VOCs if null accepted in one dataset
-                             all_vocs[all_vocs %ni% wilcox_b1_agreement]) %>%
-  as.data.frame() %>%
-  rename(comp = '.') 
-
-keep_wilcox_max <- all_vocs[all_vocs %ni% # remove VOCs if null accepted in both datasets
-                              intersect(wilcox_b_agreement, wilcox_b1_agreement)] %>%
-  as.data.frame() %>%
-  rename(comp = '.') %>%
-  mutate(wilcox_filter = ifelse(comp %in% keep_wilcox_min$comp, 'Both_datasets', 
-                                ifelse(comp %in% wilcox_b_agreement, 'Dataset_1', 'Dataset_2'))) %>%
-  mutate(FC_filter = ifelse(comp %in% intersect(cons_b, cons_b1), 'Endo_both_datasets',
-                            ifelse(comp %in% setdiff(cons_b, cons_b1), 'Endo_dataset_2',
-                                   ifelse(comp %in% setdiff(cons_b1, cons_b), 'Endo_dataset_1', 'Exo')))) 
-
-table(keep_wilcox_max$FC_filter)
-
-keep_wilcox_max <- keep_wilcox_max %>%
-  mutate(wilcox_filter = ifelse(comp %in% c('Pentanal', 'Methyl_thiocyanate'),
-                                'Dataset_1', wilcox_filter))
-
-write.csv(keep_wilcox_max, 'Endo_Exo_filters.csv')
-
-# remove VOCs where null hypothesis accepted in CV1 and CV2 (in B1 and B2)
-b_imp_sum_c <- b_imp_sum_c %>% filter(comp %in% c(keep_wilcox_max$comp, bg_mis)) %>% 
-  filter(comp != 'Internal_Standard') 
-
-b1_imp_sum_c <- b1_imp_sum_c %>% filter(comp %in%  c(keep_wilcox_max$comp, bg_mis)) %>%
-  filter(comp != 'Internal_Standard') 
-
-n_distinct(b_imp_sum_c$comp)
-
-write.csv(b_imp_sum_c, 'RADicA_B2_NAfiltered_imputed_CC2_PQN_summarised_BGfiltered.csv')
-write.csv(b1_imp_sum_c, 'RADicA_B1_NAfiltered_imputed_CC2_PQN_summarised_BGfiltered.csv')
-
-#
-
-b_imp_sum_c %>%
-  filter(comp == 'Camphor') %>%
-  ggplot() +
-  geom_histogram(aes(x = log(BG)), alpha = 0.6, fill = 'blue') +
-  geom_histogram(aes(x = log(S)), alpha = 0.6, fill = 'orange') +
-  theme_bw() +
-  xlab('log(peak area)') +
-  ggtitle('B1')
-
-
-#
-
-View(as.data.frame(intersect(b_imp_sum_c$comp, unique(model1_out$comp))))
-setdiff(b_imp_sum_c$comp, unique(model1_out$comp))
-setdiff(unique(model1_out$comp), b_imp_sum_c$comp)
-
-
-View(model1_out %>% filter(predictor == 'logBG') %>% filter(predictor == 'logBG') %>% 
-       filter(comp %in% wilcox_agreement))
-
-dot_plot <- function(voc) {
-  b_imp_sum_c %>% filter(comp == voc) %>% 
-  ggplot(aes(x = log(BG), y = log(S))) + 
-  geom_point(aes(colour = as.integer(Analysis_date))) +
-  theme_bw() +
-  scale_colour_gradientn(name = 'Date', colours = c('yellow', 'blue'), labels = as.Date) +
-  ggtitle(voc) +
-    theme(plot.title = element_text(hjust = 0.5))}
-
-cam <- dot_plot("X2_ethylfuran")
-cam
-
-
-p <- arrangeGrob(benzene, sevo, benzoic, ncol = 1)
-plot(p)
-
-ggsave('B2_wilcox_drift.tiff', p, dpi = 300, unit = 'mm', width = 90, height = 170)
-
-setdiff(wilcox_agreement, bg_sign$comp)
-
-dev.new()
-b_all %>% dplyr::select(Internal_Standard, Sample, class) %>%
-  left_join(meta %>% dplyr::select(Sample_ID, RAD_ID, CoreVisit),
-            by = c('Sample' = 'Sample_ID')) %>%
-  filter(class %in% c('BG', 'S1', 'S2')) %>%
-  pivot_wider(id_cols = c(RAD_ID, CoreVisit), 
-              names_from = class, values_from = Internal_Standard) %>%
-  ggplot(aes(x = log(BG))) + geom_point(aes(y = log(S1)), colour = 'blue') +
-  geom_point(aes(y = log(S2))) +
-  xlim(15, NA) + ylim(15, NA)
-
-b_pqn1 %>% group_by(class) %>% summarise(mean = mean(Internal_Standard, na.rm = TRUE),
-                                        sd = sd(Internal_Standard, na.rm = TRUE),
-                                        cv = sd/mean)
-
-# PCA for BG and S VOC levels following different normalisation methods
-b_imp_c1 <- b_imp_c1 %>% mutate(S = (S1+S2)/2) %>%
-  dplyr::select(!c(S1, S2)) 
-
-b_imp_c1$Analysis_date <- as.Date(b_imp_c1$Analysis_date, format = '%d/%m/%Y')
-
-b_imp_sum_c <- b_imp_c1
-
-b_imp_sum_c_w <- b_imp_sum_c %>% pivot_longer(cols = c(BG, S), names_to = 'class', values_to = 'peakArea') %>%
-  pivot_wider(names_from = comp, values_from = peakArea)
-
-assay_sum_c <- b_imp_sum_c_w[,-c(1:6)]
-
-pc_sum_cc <- pca(log(assay_sum_c), scale = TRUE, center = TRUE)
-
-pc_sum_cc2$variates$X %>% as.data.frame() %>% 
-  cbind(b_imp_sum_c_w$Analysis_date) %>%
-  rename(Analysis_date = 'b_imp_sum_c_w$Analysis_date') %>%
-  ggplot(aes(x = PC1, y = PC2)) + 
-  geom_point(aes(colour = as.integer(as.Date(Analysis_date)))) +
-  scale_color_gradientn(name = 'Date', colours = c('yellow', 'blue'), labels = as.Date) +
-  theme_bw() +
-  ggtitle('PCA of breath and background B2 samples')
-
-dev.new()
-plotLoadings(pc_sum_c, comp = 2, ndisplay = 20)
-
-ggsave('B2_PCA_CC2_drift.tiff', dpi = 300, width = 105, height = 60, unit = 'mm')
-
-pc_sum_cc 
-pc_sum_pqn
-pc_sum_cc2
-
-pqn_load <- pc_sum_pqn$loadings$X %>% as.data.frame()
-cc_load <-  pc_sum_cc$loadings$X %>% as.data.frame()
-cc2_load <- pc_sum_cc2$loadings$X %>% as.data.frame()
-
-top_cc2 <- cc2_load %>% arrange(desc(abs(PC2))) %>% slice(1:20)
-top_cc <- cc_load %>% arrange(desc(abs(PC2))) %>% slice(1:20)
-top_pqn1 <- pqn_load %>% arrange(desc(abs(PC1))) %>% slice(1:20)
-
-intersect(rownames(top_cc), rownames(top_cc2))
-intersect(rownames(top_cc), rownames(top_pqn1))
-intersect(rownames(top_cc2), rownames(top_pqn1))
-
-
-#########################################################truehist()#
-#############################
-
-# BG correction based on regression modelling
-# linear regression
-
-# Baseline model
-library(performance)
-
-reg_coefs2 <- function(df) {
+## BACKGROUND CORRECTION
+# Baseline model of the relationship between breath and background
+reg_base <- function(df) {
   bind_rows(test <- lapply(unique(df$comp), function(voc){
     subset <- df %>%
       filter(comp == voc) %>%
       drop_na() %>%
-      filter(CoreVisit %in% c('CV1', 'CV2')) %>%
-      mutate(logS = log(S), logBG = log(BG)) #%>%
-      #left_join(infl_obs) %>% # code to exclude influential points based on deletion diagnostics
-      #mutate(obs = ifelse(is.na(obs) == TRUE, NA, 'infl')) %>%
-      #filter(obs %ni% c('infl'))
+      mutate(logS = log(S), logBG = log(BG)) %>%
+      left_join(infl_obs) %>% # code to exclude influential points based on deletion diagnostics
+      mutate(obs = ifelse(is.na(obs) == TRUE, NA, 'infl')) %>%
+      filter(obs %ni% c('infl'))
 
     
     model <- lmer(logS ~ logBG + (1 | RAD_ID),
@@ -321,115 +88,35 @@ reg_coefs2 <- function(df) {
              AIC = AIC(model),
              BIC = BIC(model)) 
     
-    
-    
   }))
   
 }
 
-# in test dataset (B2)
 
-reg_results_b <- reg_coefs2(b_imp_sum_c)
-reg_results_b1 <- reg_coefs2(b1_imp_sum_c)
+base_results_b2 <- reg_base(b2_imp_sum)
 
-colnames(reg_results_b)[5] <- 'p.value'
+colnames(base_results_b2)[5] <- 'p.value'
 
-reg_results_b <- reg_results_b %>% 
+write.csv(base_results_b2, 'Baseline_BG_model_results_B2.csv')
+
+base_results_b2 <- read.csv('Baseline_BG_model_results_B2.csv')[,-1]
+
+base_results_b2 <- base_results_b2 %>% 
   filter(predictor == 'logBG') %>%
   mutate(adj.p.value = p.adjust(p.value, method = 'BH'))
 
-reg_results_b_sign <- reg_results_b %>% filter(adj.p.value < 0.05)
-
-# compare with results from B1 dataset normalised using PQN only
-pqn_reg_b1 <- read.csv('PQN_regression_results_BG_filtered.csv')[,-1]
-colnames(pqn_reg_b1)[5] <- 'p.value'
-
-pqn_reg_b1 <- pqn_reg_b1 %>% 
-  filter(predictor == 'logBG') %>%
-  mutate(adj.p.value = p.adjust(p.value, method = 'BH'))
-
-pqn_reg_b1_sign <- pqn_reg_b1 %>% filter(adj.p.value < 0.05)
-
-reg_comp_b1 <- pqn_reg_b1 %>% full_join(reg_results_b1, by = 'comp') %>%
-  drop_na()
-
-pqn_s <- reg_comp_b1 %>% filter(adj.p.value.x < 0.05)
-ccpqn_s <- reg_comp_b1 %>% filter(adj.p.value.y < 0.05)
-
-View(reg_comp_b1 %>% filter(comp %in% setdiff(ccpqn_s$comp, pqn_s$comp)))
-
-plot(reg_comp_b1$adj.p.value.x, reg_comp_b1$adj.p.value.y) + abline(h = 0.05)  + abline(v = 0.05)
-
-#
-
-reg_comp_m1 <- reg_results1_b1 %>% 
-  full_join(reg_results1_b %>% filter(predictor == 'logBG') %>%
-              mutate(adj.p.value = p.adjust(p.value, method = 'BH')), by = 'comp') %>%
-  drop_na()
-
-b1_s <- reg_comp_m1 %>% filter(adj.p.value.x < 0.05)
-b_s <- reg_comp_m1 %>% filter(adj.p.value.y < 0.05)
-
-View(reg_comp_m1 %>% filter(comp %in% setdiff(b_s$comp, b1_s$comp)))
-intersect(b1_s$comp, b_s$comp)
-  
-intersect(reg_results_b1_sign$comp, pqn_reg_b1_sign$comp)
-intersect(reg_results_b_sign$comp, pqn_reg_b1_sign$comp)
-
-
-
-#pqn_imp_sum_c %>% 
-b1_imp_sum_c %>%  
-  filter(comp == 'X1_Propene._1_.methylthio._._.Z._') %>%
-  ggplot(aes(x = log(BG), y = log(S))) +
-  geom_point(aes(colour = as.integer(as.Date(Analysis_date)))) +
-  scale_color_gradientn(name = 'Date', colours = c('yellow', 'blue'), labels = as.Date)  +
-  #xlim(NA, 12.5) +
-  theme_bw()
-
-comp_regs_b1 <- pqn_reg_b1_sign %>% full_join(reg_results_b1_sign, by = 'comp')
-comp_regs <- reg_results1_b_sign %>% full_join(reg_results_b1_sign, by = 'comp')
-
-plot(comp_regs$Estimate.x, comp_regs$Estimate.y) + abline(0,1)
-
-#
-
-test <- reg_results_pqn %>% 
-  arrange(p.value) %>%
-  mutate(rank = c(1:152),
-         fdr = 0.05*(rank/nrow(.)))
-View(test %>% filter(p.value < fdr))
-
-reg_results_pqn_sign <- reg_results_pqn %>% filter(adj.p.value < 0.05)
-
-write.csv(reg_results_b, 'B2_CC_PQN_regression_results_BG_filtered.csv')
-reg_results_b <- 
-
-# Baseline model on data without influential observations
-# infl observations detected based on the code below
-reg_results_pqn_infl <- reg_coefs2(b1_imp_sum_c)
-
-colnames(reg_results_pqn_infl)[5] <- 'p.value'
-
-reg_results_pqn_infl <- reg_results_pqn_infl %>% 
-  filter(predictor == 'logBG') %>%
-  mutate(adj.p.value = p.adjust(p.value, method = 'BH'))
-
-reg_results_pqn_inflsign <- reg_results_pqn_infl_BG %>% filter(adj.p.value < 0.05)
 
 #
 #
 #
 
-##############################
-##############################
+###############################
 
 # DELETION DIAGNOSTICS OF INFLUENTIAL OBSERVATIONS
 del_diag <- function(df) {
   bind_rows(lapply(unique(df$comp), function(voc){
     subset <- df %>%
       filter(comp == voc) %>%
-      filter(CoreVisit %in% c('CV1', 'CV2')) %>%
       drop_na() %>%
       mutate(logS = log(S), logBG = log(BG)) 
     
@@ -448,14 +135,12 @@ del_diag <- function(df) {
     }))
 }
 
-b1_diag <- del_diag(b1_imp_sum_c)
-write.csv(b1_diag, 'B1_CCPQN_deletion_diagnostics.csv')
+b2_diag <- del_diag(b2_imp_sum)
+
+write.csv(b2_diag, 'B2_deletion_diagnostics.csv')
 
 # visualise deletion diagnostics results
-library(forcats)
-library(ggrepel)
-
-b1_diag$obs <- gsub("\\..*","", rownames(b1_diag))
+b2_diag$obs <- gsub("\\..*","", rownames(b2_diag))
 
 del_diag_cooks_fun <- function(data){ 
   lapply(unique(data$comp), function(voc) {
@@ -473,14 +158,13 @@ del_diag_cooks_fun <- function(data){
       ggtitle(voc)
   })}
 
-del_diag_cooks1 <- del_diag_cooks_fun(b1_diag)
+del_diag_cooks1 <- del_diag_cooks_fun(b2_diag)
 
-pdf('B1_Deletion_diagnostic_cooksD.pdf')
+pdf('B2_Deletion_diagnostic_cooksD.pdf')
 marrangeGrob(del_diag_cooks1, nrow = 4, ncol = 1)
 dev.off()
 
 #
-
 del_diag_dfbetas_fun <- function(data){ 
   lapply(unique(data$comp), function(voc) {
     data <- data %>% filter(comp == voc) %>%
@@ -497,39 +181,58 @@ del_diag_dfbetas_fun <- function(data){
       ggtitle(voc)
   })}
 
-del_diag_dfbetas1 <- del_diag_dfbetas_fun(b1_diag)
+del_diag_dfbetas1 <- del_diag_dfbetas_fun(b2_diag)
 
-pdf('B1_Deletion_diagnostic_dfbetas.pdf')
+pdf('B2_Deletion_diagnostic_dfbetas.pdf')
 marrangeGrob(del_diag_dfbetas1, nrow = 4, ncol = 1)
 dev.off()
 
 #
 
-# READ CSV FILE WITH INFLUENTIAL POINTS FLAGGED BY HAND 
-infl_obs <- read.csv('B2_Deletion_diagnostics.csv')
-infl_obs <- infl_obs %>% 
-  rename(comp = VOC) %>%
-  separate(Potential_outlier, 
-           into = c('o1', 'o2', 'o3', 'o4', 'o5', 'o6', 'o7', 'o8'), 
-           sep = ',') %>%
-  pivot_longer(cols = !comp, names_to = 'outlier_no', values_to = 'obs') %>%
-  drop_na()
+# load file of influential observations selected based on inspection of deletion diagnostics graphs 
+infl_obs_raw <- read.csv('B2_deletion_diagnostics_raw.csv')
 
-infl_obs$obs <- gsub(' ', '', infl_obs$obs)
+# format the file to annotate observations with sample IDs
+infl_obs_raw1 <- cbind(infl_obs_raw[,1], str_split(infl_obs_raw$Potential_outlier, pattern = ',', 
+                                                   n = 6, simplify = TRUE)) %>% as.data.frame()
 
-table(infl_obs$outlier_no) %>% as.data.frame() %>% 
-  ggplot(aes(x = gsub('o', '', Var1), y = Freq)) +
-  geom_col() +
+colnames(infl_obs_raw1) <- c('comp', 'o1', 'o2', 'o3', 'o4', 'o5', 'o6')
+
+infl_obs_raw_l <- infl_obs_raw1 %>% pivot_longer(cols =! comp, names_to = 'outlier_no', values_to = 'obs') %>%
+  filter(obs != '') %>%
+  mutate(obs = as.numeric(obs)) 
+
+obs_id <- b2_imp_sum %>% filter(comp == '.beta._Myrcene') %>%
+  mutate(obs = as.numeric(rownames(.))) %>% dplyr::select(obs, Sample)
+
+infl_obs <- infl_obs_raw_l %>% left_join(obs_id)
+
+write.csv(infl_obs, 'Deletion_diagnostics_formatted_B2.csv')
+
+
+#
+
+# visualise % of data removed across VOCs
+infl_obs %>% group_by(comp) %>%
+  summarise(n = n()) %>%
+  ggplot(aes(x = n)) +
+  geom_histogram(binwidth = 0.5) +
   xlab('Number of influential observations') +
   ggtitle('Distribution of VOCs according to \n the influential observation count') +
   theme_bw(base_size = 10) +
   theme(plot.title = element_text(size = 10)) +
   ylab('VOC number') +
   geom_vline(xintercept = 6, colour = 'red') +
-  annotate('text',label = '5% of data', x = 7, y = 140, colour = 'red')
+  annotate('text',label = '5% of data', x = 4.8, y = 40, colour = 'red', size = 3)
 
-ggsave('Histogram_infl_obs_VOCs_B1_PQNCC.tiff', unit = 'mm', dpi = 300, width = 65, height = 50)  
+ggsave('Histogram_infl_obs_VOCs_B2.tiff', unit = 'mm', dpi = 300, width = 65, height = 50)  
 
+infl_sum <- infl_obs %>% group_by(comp) %>% summarise(n = n())
+table(infl_sum$n)
+
+#
+
+# visualise number of VOCs where observation was flagged as outlier
 table(infl_obs$obs) %>% as.data.frame() %>% 
   arrange(desc(Freq)) %>% 
   ggplot(aes(x = fct_inorder(Var1), y = Freq)) + 
@@ -538,29 +241,18 @@ table(infl_obs$obs) %>% as.data.frame() %>%
   theme(axis.text.x = element_blank()) +
   xlab('observation ID') +
   ylab('VOC number') +
-  theme(plot.title = element_text(size = 10)) +
-  ggtitle('Number of VOCs with observation flagged as influential')
+  theme(plot.title = element_text(size = 9)) +
+  ggtitle('Number of VOC where observation was flagged as influential')
 
 ggsave('Histogram_infl_obs_B2.tiff', unit = 'mm', dpi = 300, width = 100, height = 60)
 
-# add Sample IDs to influential observations database
-infl_obs <- infl_obs %>%
-  left_join(b_imp_sum_c %>% filter(CoreVisit %in% c('CV1', 'CV2')) %>%
-              dplyr::select(Sample) %>% distinct() %>%
-              mutate(obs = rownames(.)))
-
-View(infl_obs %>% group_by(Sample) %>% summarise(n = n()))
-
-write.csv(infl_obs, 'Deletion_diagnostics_formatted_B2.csv')
-infl_obs1 <- read.csv('Deletion_diagnostics_formatted_B1_CCPQN.csv')[,-1]
-infl_obs <- read.csv('Deletion_diagnostics_formatted_B2.csv')[,-1]
+#
 
 # highlight influential observations on scatter plots
 bg_s_plot_infl <- function(df) {
   lapply(unique(df$comp), function(voc) {
     subset <- df %>% filter(comp == voc) %>%
       mutate(logS = log(S), logBG = log(BG)) %>%
-      filter(CoreVisit %in% c('CV1', 'CV2')) %>%
       left_join(infl_obs %>% dplyr::select(!outlier_no)) %>%
       mutate(obs = ifelse(is.na(obs) == TRUE, NA, 'infl'))
     
@@ -578,62 +270,44 @@ bg_s_plot_infl <- function(df) {
   })
 }
 
-cooks <- plot
-dfbetas <- plot
 
-del_diag_ex <- arrangeGrob(cooks, dfbetas, nrow = 2)
-plot(del_diag_ex)
-ggsave('Del_diag_examples.tiff', del_diag_ex, unit = 'mm', dpi = 300, width = 60, height = 120)
+plots_infl <- bg_s_plot_infl(b2_imp_sum)
 
-plots_infl <- bg_s_plot_infl(b_imp_sum_c)
-
-pdf('B2_BGvsS_scatterPlots_PQN_CV12_BGfiltered_DelDiag.pdf')
-marrangeGrob(plots_infl, nrow = 4, ncol = 4)
+pdf('B2_BGvsS_scatterPlots_outliers.pdf')
+marrangeGrob(plots_infl, nrow = 3, ncol = 3)
 dev.off()
 
 #
 #
 #
 
-# compare the effect of excluding influential observations on regression estimates
-# number of VOCs with significant logBG effect
-library(VennDiagram)
+# Effect of removing influential points on baseline model results
+# re-run reg_base function with activated code removing outliers
+base_results_b2_infl <- reg_base(b2_imp_sum) 
 
-setdiff(reg_results_pqn_sign$comp, reg_results_pqn_infl_sign$comp)
-setdiff(reg_results_pqn_infl_sign$comp, reg_results_pqn_sign$comp)
+colnames(base_results_b2_infl)[5] <- 'p.value'
 
-venn.diagram(
-  x = list(reg_results_pqn_sign$comp, reg_results_pqn_infl_sign$comp),
-  category.names = c('All \n data', 'Excl. \n outliers'),
-  filename = 'Venn_mixed_reg_sign.png',
-  output = TRUE,
-  cex = 2,
-  fontface = 'bold',
-  cat.cex = 2,
-  cat.fontface = 'bold',
-  cat.default.pos = "outer",
-  fill = c('pink', 'grey'),
-  fontfamily = "sans",
-  cat.fontfamily = 'sans',
-  margin = 0.08,
-  cat.dist = c(0.05, 0.05),
-  main = 'Number of VOCs with \n significant logBG effect',
-  main.cex = 2,
-  main.fontface = 'bold',
-  main.fontfamily = 'sans',
-  main.just = c(0.5, -0.5)
-)
+write.csv(base_results_b2_infl, 'Baseline_no_infl_BG_model_results_B2.csv')
 
-# slopes
-reg_results_comp <- reg_results_pqn %>%
+base_results_b2_infl <- read.csv('Baseline_no_infl_BG_model_results_B2.csv')[,-1]
+
+base_results_b2_infl <- base_results_b2_infl %>% 
+  filter(predictor == 'logBG') %>%
+  mutate(adj.p.value = p.adjust(p.value, method = 'BH'))
+
+#
+
+# Compare the effect of excluding influential observations on regression estimates
+# slopes (coefficients)
+base_results_comp <- base_results_b2 %>%
   mutate(Data = 'All_data') %>%
-  rbind(reg_results_pqn_infl %>%
+  rbind(base_results_b2_infl %>%
           mutate(Data = 'Excl_outliers')) %>%
   mutate(Sign = ifelse(adj.p.value < 0.05, 'Yes', 'No')) %>%
   mutate(CI_width = CI_upr - CI_lwr) 
 
 
-reg_results_comp1 <- reg_results_comp %>%
+base_results_comp1 <- base_results_comp %>%
   pivot_wider(id_cols = comp, names_from = Data, values_from = c(Estimate, Sign, CI_width, r2)) %>%
   mutate(Significant = ifelse(Sign_All_data == 'Yes' & Sign_Excl_outliers == 'Yes',
                               'Both', ifelse(
@@ -646,9 +320,9 @@ reg_results_comp1 <- reg_results_comp %>%
 
 
 estimate_comp <- 
-  reg_results_comp1 %>%
+  base_results_comp1 %>%
   ggplot(aes(y = Estimate_All_data, x = Estimate_Excl_outliers)) + 
-  geom_point(aes(colour = Significant), size = 0.8, alpha = 0.7) +
+  geom_point(aes(colour = Significant), size = 0.8, alpha = 0.6) +
   coord_fixed() +
   geom_abline(intercept = 0, slope = 1) +
   theme_bw(base_size = 10) +
@@ -657,13 +331,12 @@ estimate_comp <-
   ggtitle('Regression logBG coefficient') +
   theme(legend.position = 'none')
 
-estimate_comp
 
 # confidence intervals
 CI_comp <- 
-  reg_results_comp1 %>%
+  base_results_comp1 %>%
   ggplot(aes(y = CI_width_All_data, x = CI_width_Excl_outliers)) + 
-  geom_point(aes(colour = Significant), size = 0.8, alpha = 0.7) +
+  geom_point(aes(colour = Significant), size = 0.8, alpha = 0.6) +
   coord_fixed() +
   geom_abline(intercept = 0, slope = 1) +
   theme_bw(base_size = 10) +
@@ -672,10 +345,11 @@ CI_comp <-
   ggtitle('Regression logBG 95% CI width') +
   theme(legend.position = 'none')
 
+# R2 (varaince explained)
 r2_comp <- 
-  reg_results_comp1 %>%
+  base_results_comp1 %>%
   ggplot(aes(y = r2_All_data, x = r2_Excl_outliers)) + 
-  geom_point(aes(colour = Significant), size = 0.8, alpha = 0.7) +
+  geom_point(aes(colour = Significant), size = 0.8, alpha = 0.6) +
   coord_fixed() +
   geom_abline(intercept = 0, slope = 1) +
   theme_bw(base_size = 10) +
@@ -688,945 +362,276 @@ library(cowplot)
 
 comp_plots <- plot_grid(estimate_comp, CI_comp, r2_comp, nrow = 1, align = 'h',
                         rel_widths = c(0.3, 0.3, 0.4))
-
+dev.new()
 comp_plots
 
 ggsave('Regression_comparison_del_diag.tiff' , comp_plots, dpi = 300, unit = 'mm',
        width = 260, height = 80)
 
-reg_results_pqn_sign <- reg_results_pqn_sign %>% mutate(model = 'All data')
-reg_results_pqn_infl_BG_sign <- reg_results_pqn_infl_BG_sign %>% mutate(model = 'Excl. outlier')
-
-BGresults <- rbind(reg_results_pqn_infl_BG_sign, reg_results_pqn_sign)
-p1 <- BGresults %>% ggplot(aes(x = Estimate, fill = model)) + 
-  geom_histogram(position = 'identity', alpha = 0.5, bins = 12) +
-  theme_bw() 
-p2 <- BGresults %>% 
-  mutate(CI_width = CI_upr - CI_lwr) %>%
-  ggplot(aes(x = CI_width, fill = model)) + 
-  geom_histogram(position = 'identity', alpha = 0.5, bins = 12) +
-  theme_bw() 
-p3 <- BGresults %>% 
-  ggplot(aes(x = r2, fill = model)) + 
-  geom_histogram(position = 'identity', alpha = 0.5, bins = 12) +
-  theme_bw() 
-
-p <- arrangeGrob(p1, p2, p3, nrow = 1)
-plot(p)
-ggsave('Histograms_reg_results_outliers.tiff', p, dpi = 300, unit = 'mm', width = 220, height = 40)
-
 
 #
 #
 #
 
-# MODEL 2 (with interaction)
-reg_coefs <- function(df) {
-  bind_rows(test <- lapply(unique(df$comp), function(voc){
+###############################
+
+#  Final model of the relationship between breath and background
+# including covariates 
+
+# join with clinical metadata
+b2_imp_sum_annot <- b2_imp_sum %>% left_join(meta %>% dplyr::select(RAD_ID, Diagnosis)) %>% distinct() 
+
+reg_fin <- function(df) {
+  bind_rows(lapply(unique(df$comp), function(voc){
     subset <- df %>%
       filter(comp == voc) %>%
-      filter(CoreVisit %in% c('CV1', 'CV2')) %>%
       drop_na() %>%
       mutate(logS = log(S), logBG = log(BG)) %>%
       left_join(infl_obs) %>% # code to exclude influential points based on deletion diagnostics
       mutate(obs = ifelse(is.na(obs) == TRUE, NA, 'infl')) %>%
       filter(obs %ni% c('infl'))
-    #filter(Sample %ni% c('190903_RaDICA_RAD032'))
     
-    
-    model <- lmer(logS ~ logBG*Diagnosis + CoreVisit + (1 | RAD_ID),
+    model <- lmer(logS ~ logBG + Diagnosis + CoreVisit + (1 | RAD_ID),
                   data = subset)
     
     coefs <- cbind(as.data.frame(coef(summary(model))),
-                   as.data.frame(confint(model)[3:7,])) %>%
-      mutate(comp = rep(voc, 5),
-             n = rep(nrow(subset), 5),
-             r2 = rep(r2(model)[[2]], 5),
+                   as.data.frame(confint(model)[3:6,])) %>%
+      mutate(comp = rep(voc, 4),
+             n = rep(nrow(subset), 4),
+             r2 = rep(r2(model)[[2]], 4), 
              predictor = rownames(.),
-             AIC = rep(AIC(model), 5),
-             BIC = rep(BIC(model), 5))
+             AIC = rep(AIC(model), 4),
+             BIC = rep(BIC(model), 4))
     
     
   }))
   
 }
 
-#
+fin_results_b2 <- reg_fin(b2_imp_sum_annot)
 
-reg_results0_pqn <- reg_coefs(b1_imp_sum_c)
-colnames(reg_results0_pqn)[5] <- 'p.value'
-reg_results0_pqn_itc <- reg_results0_pqn %>%
-  filter(predictor == 'logBG:DiagnosisNot Asthma') %>%
-  mutate(adj.p.value = p.adjust(p.value, method = 'fdr')) %>%
-  filter(p.value < 0.05)
+colnames(fin_results_b2)[5] <- 'p.value'
 
-View(reg_results0_pqn %>%
-       filter(predictor == 'DiagnosisNot Asthma') %>%
-       mutate(adj.p.value = p.adjust(p.value, method = 'BH')) %>%
-       filter(p.value < 0.05))
+write.csv(fin_results_b2, 'Final_BG_model_results_B2.csv')
 
-# function for plotting individual VOCs
-plot_voc <- function(voc){
-  subset <- df %>%
-    filter(comp == voc) %>%
-    filter(CoreVisit %in% c('CV1', 'CV2')) %>%
-    drop_na() %>%
-    mutate(logS = log(S), logBG = log(BG)) 
-  
-  
-  subset %>%
-    #filter(Diagnosis == 'Not Asthma') %>%
-    ggplot(aes(x = logBG, y = logS)) + 
-    geom_point(size = 1, alpha = 0.8, aes(colour = Diagnosis)) +
-    ylab('logS') + xlab('logBG') +
-    theme_bw(base_size = 10) +
-    #theme(legend.position = 'none') +
-    #geom_label(aes(label = Sample)) +
-    geom_smooth(method = 'lm', se = FALSE) +
-    ggtitle(voc) +
-    geom_abline(intercept = 0, slope = 1)
-  }
-  
-dev.new()
-plot_voc('Azetidine')
-ggsave('Ethyl_Acetate.tiff', unit = 'mm', dpi = 300, width = 120, height = 80)
- 
-# 
-#
-#
+fin_results_b2 <- read.csv('Final_BG_model_results_B2.csv')[-1]
 
-# MODEL 1 (Final)
-b1_imp_sum_c <- b1_imp_sum_c %>% left_join(meta %>% dplyr::select(RAD_ID, Diagnosis)) %>% distinct() %>%
-  left_join(clin_dyn %>% dplyr::select(RAD_ID, CoreVisit, FVCPre))
+# number of VOCs with significant effect of background
+fin_results_b2_bg <- fin_results_b2 %>% 
+  filter(predictor == 'logBG')
 
-reg_coefs1 <- function(df, voc_list) {
-  bind_rows(lapply(voc_list, function(voc){
-    subset <- df %>%
-      filter(comp == voc) %>%
-      filter(CoreVisit %in% c('CV1', 'CV2')) %>%
-      drop_na() %>%
-      mutate(logS = log(S), logBG = log(BG)) %>%
-      #mutate(SlogS = logS/sd(logS, na.rm = TRUE), # code for standarised regression coefficients
-             #SlogBG = logBG/sd(logBG, na.rm = TRUE)) %>%
-      left_join(infl_obs) %>% # code to exclude influential points based on deletion diagnostics
-      mutate(obs = ifelse(is.na(obs) == TRUE, NA, 'infl')) %>%
-      filter(obs %ni% c('infl'))
-    
-    model <- lmer(logS ~ logBG + Diagnosis + CoreVisit + FVCPre +
-                  (1 | RAD_ID),
-                  data = subset)
-    
-    #model <- lmer(SlogS ~ logBG + Diagnosis + CoreVisit + (1 | RAD_ID), # code for standarised regression coefficients
-                  #data = subset)
-    
-    coefs <- cbind(as.data.frame(coef(summary(model))),
-                   as.data.frame(confint(model)[3:7,])) %>%
-      mutate(comp = rep(voc, 5),
-             n = rep(nrow(subset), 5),
-             r2 = rep(r2(model)[[2]], 5), 
-             predictor = rownames(.),
-             AIC = rep(AIC(model), 5),
-             BIC = rep(BIC(model), 5))
-    
-    
-  }))
-  
-}
-
-vocs <- unique(b_imp_sum_c$comp)
-vocs <- vocs[vocs %ni% c('Pentanal', 'Methylthioacetate')]
-
-vocs <- vocs[vocs != 'Methyl_thiocyanate']
-
-reg_results1_b <- reg_coefs1(b1_imp_sum_c, vocs)
-
-colnames(reg_results1_b)[5] <- 'p.value'
-
-View(reg_results1_b %>% filter(predictor == 'FVCPre') %>%
-       filter(p.value < 0.05))
-
-#
-
-reg_results1_b_sign <- reg_results1_b %>% 
+fin_results_b2_bg_sign <- fin_results_b2 %>% 
   filter(predictor == 'logBG') %>%
   mutate(adj.p.value = p.adjust(p.value, method = 'BH')) %>%
   filter(adj.p.value < 0.05)
 
-write.csv(reg_results1_b1_ccpqn, 'Model1_results_B1_CCPQN.csv')
-reg_results1_b1 <- read.csv('Model1_results.csv')
-write.csv(reg_results1_b, 'Model1_results_B2.csv')
-reg_results1_b <- read.csv('Model1_results_B2.csv')
-
-asthma_pred_b <- reg_results1_b %>% 
+# number of VOCs with significant effect of diagnosis
+asthma_pred_b2 <- fin_results_b2 %>% 
   filter(predictor == 'DiagnosisNot Asthma') %>%
   mutate(adj.p.value = p.adjust(p.value, method = 'BH'))
 
-View(asthma_pred_b %>% filter(comp %in% rownames(loads_vip_top)))
+asthma_pred_b_sign <- asthma_pred_b2 %>% filter(p.value < 0.05)
 
-asthma_pred_b_sign <- asthma_pred_b %>% filter(p.value < 0.05)
-
-hist(asthma_pred_b1$p.value, breaks = 20)
-
-# FINAL MODEL
-# compare B1 regression results depending on normalisation method
-b1_reg <- reg_results1_b1_ccpqn %>% 
-  filter(predictor == 'logBG') %>%
-  mutate(adj.p.value = p.adjust(p.value, method = 'BH')) %>%
-  left_join(reg_results1_b1 %>% 
-              filter(predictor == 'logBG') %>%
-              mutate(adj.p.value = p.adjust(p.value, method = 'BH')), 
-            by = 'comp') %>%
-  drop_na() %>%
-  mutate(sign = ifelse(adj.p.value.x < 0.05 & adj.p.value.y < 0.05, 'both',
-                       ifelse(adj.p.value.x < 0.05 & adj.p.value.y > 0.05, 'CC PQN', 
-                              ifelse(adj.p.value.x > 0.05 & adj.p.value.y < 0.05, 'PQN', 'none'))))
-
-table(b1_reg$sign)
-
-View(b1_reg %>% filter(adj.p.value.y < 0.05))
-
-tiff('Scatter_plot_compare_b1_model1_pvals.tiff', res = 300, units = 'mm', width = 110, height = 110)
-plot(-log10(b1_reg$adj.p.value.x), -log10(b1_reg$adj.p.value.y), 
-     col = as.factor(b1_reg$sign), cex.main = 0.9,
-     xlab = 'CC2 PQN',  ylab= 'PQN',
-     main = 'Adjusted -log10(p-value) related to the logBG effect') +
-  abline(h = -log10(0.05), lty = 2) +
-  abline(v = -log10(0.05), lty = 2) +
-  abline(0, 1) +
-  text(x = 10, y = 0.1, label = 6, col = 'red') +
-  text(x = 0.1, y = 10, label = 16, col = 'blue') +
-  text(x = 10, y = 3, label = 62)
-dev.off() 
-
-#
-tiff('Scatter_plot_compare_b1_model1_coefs.tiff', res = 300, units = 'mm', width = 110, height = 110)
-plot(b1_reg$Estimate.x, b1_reg$Estimate.y, 
-     col = as.factor(b1_reg$sign),
-     main = 'Regression coefficients related to logBG effect',
-     xlab = 'CC2 PQN',  ylab= 'PQN', cex.main = 0.9) +
-  abline(0, 1) +
-  abline(v = 0, lty = 2) +
-  abline(h = 0, lty = 2)
-dev.off()
-
-# compare B1 and B2
-intersect(reg_results1_b_sign$comp, reg_results1_b1_ccpqn_sign$comp)
-
-comp_b1b <- reg_results1_b1_ccpqn %>% filter(predictor == 'logBG') %>%
-  mutate(adj.p.value = p.adjust(p.value, method = 'BH')) %>%
-  left_join(reg_results1_b%>% filter(predictor == 'logBG') %>%
-              mutate(adj.p.value = p.adjust(p.value, method = 'BH')), by = 'comp') %>%
-  mutate(sign = ifelse(adj.p.value.x < 0.05 & adj.p.value.y < 0.05, 'both',
-                       ifelse(adj.p.value.x < 0.05 & adj.p.value.y > 0.05, 'B1',
-                              ifelse(adj.p.value.x > 0.05 & adj.p.value.y < 0.05, 'B2', 'none'))))
-
-table(comp_b1b$sign)
-
-tiff('Scatter_plot_compare_b1VSb_model1_pvals.tiff', res = 300, units = 'mm', width = 110, height = 110)
-plot(-log10(comp_b1b$adj.p.value.x), -log10(comp_b1b$adj.p.value.y), 
-     col = as.factor(comp_b1b$sign), cex.main = 0.9,
-     xlab = 'B1',  ylab= 'B2',
-     main = 'Adjusted -log10(p-value) related to the logBG effect') +
-  abline(h = -log10(0.05), lty = 2) +
-  abline(v = -log10(0.05), lty = 2) +
-  abline(0, 1) +
-  text(x = 10, y = 0.1, label = 34) +
-  text(x = 0.1, y = 10, label = 29, col = 'red') +
-  text(x = 10, y = 4, label = 54, col = 'green')
-dev.off() 
-
-#
-tiff('Scatter_plot_compare_b1VSb_model1_coefs.tiff', res = 300, units = 'mm', width = 110, height = 110)
-plot(comp_b1b$Estimate.x, comp_b1b$Estimate.y, 
-     col = as.factor(comp_b1b$sign),
-     main = 'Regression coefficients related to logBG effect',
-     xlab = 'B1',  ylab= 'B2', cex.main = 0.9) +
-  abline(0, 1) +
-  abline(v = 0, lty = 2) +
-  abline(h = 0, lty = 2)
-
-dev.off()
-
+hist(asthma_pred_b2$p.value, breaks = 12)
 
 #
 #
 #
 
-# standarised regression
-reg_results1_pqn_stand <- reg_coefs1(b1_imp_sum_c)
-
-colnames(reg_results1_pqn_stand)[5] <- 'p.value'
-
-asthma_pred_pqn_stand <- reg_results1_pqn_stand %>% filter(predictor == 'DiagnosisNot Asthma') %>%
-  mutate(adj.p.value = p.adjust(p.value, method = 'BH'))
-
-#
-#
-#
-
-##############################
 ##############################
 
 # MODEL SELECTION
-# compare model fit with and without interaction term
-# with and without random effect
+# compare model fit after exclusion of influential observations
+# after inclusion of covariates
 mod_fit <- rbind(
-  reg_results0_pqn %>% mutate(model = 'Fixed_itc') %>%
-    filter(predictor == 'logBG') %>% dplyr::select(comp, model, AIC, BIC, r2),
-  reg_results1_pqn %>% mutate(model = 'Fixed') %>%
-    filter(predictor == 'logBG') %>% dplyr::select(comp, model, AIC, BIC, r2),
-  reg_results_pqn %>% mutate(model = 'Mixed') %>%
-    filter(predictor == 'logBG') %>% dplyr::select(comp, model, AIC, BIC, r2))
+  base_results_b2 %>% mutate(model = 'Baseline') %>%
+    filter(predictor == 'logBG') %>% dplyr::select(comp, model, AIC, BIC, r2, Estimate, p.value, adj.p.value),
+  base_results_b2_infl %>% mutate(model = 'Baseline_no_infl') %>%
+    filter(predictor == 'logBG') %>% dplyr::select(comp, model, AIC, BIC, r2, Estimate, p.value, adj.p.value),
+  fin_results_b2 %>% mutate(model = 'Final') %>%
+    filter(predictor == 'logBG') %>% dplyr::select(comp, model, AIC, BIC, r2, Estimate, p.value) %>%
+    mutate(adj.p.value = p.adjust(p.value, method = 'BH'))) 
 
-comp <- mod_fit %>% 
-  mutate(model = ifelse(model == 'Fixed', 'Model_1', ifelse(
-    model == 'Fixed_itc', 'Model_2', 'Baseline_model'))) %>%
-  pivot_longer(cols = c(AIC, BIC), names_to = 'Parameter', values_to = 'value') %>%
+mod_fit_L <- mod_fit %>% pivot_longer(cols = c(AIC, BIC, r2), names_to = 'parameter', values_to = 'value')
+
+plot_pairwise <- function(Measure){
+  anno_plot <- compare_means(value ~ model,
+                             paired = TRUE,
+                             method = 'wilcox.test',
+                             data = mod_fit_L %>% filter(parameter == Measure),
+                             p.adjust.method = 'BH') %>%
+    mutate(y = c(570, 535, 500))  %>% 
+    as.data.frame() %>%
+    filter(p.adj < 0.05) %>%
+    mutate(p.adj = '< 0.001')
+  
+  mod_fit_L %>%
+    filter(parameter == Measure) %>%
   ggplot(aes(x = model, y = value, fill = model)) + geom_violin() +
   geom_boxplot(width = 0.5) +
-  facet_wrap(~Parameter, scale = 'free') +
-  theme_bw() +
+  theme_bw(base_size = 10) +
   theme(axis.title.x = element_blank(),
         axis.text.x = element_text(size = 8),
-        legend.position = 'bottom')
+        legend.position = 'bottom') +
+  geom_signif(data = anno_plot, 
+              aes(annotations = p.adj, xmin = group1, xmax = group2, y_position = y), manual = TRUE,
+              inherit.aes = FALSE, tip_length = 0.01, textsize = 2, size = 0.2) +
+    ylim(NA, 600) 
+  }
 
-comp
 
-ggsave('BIC_AIC_violin.tiff', dpi = 300, unit = 'mm', width = 120, height = 70)
+aic <- plot_pairwise('AIC') + ggtitle('BIC') + theme(plot.title = element_text(hjust = 0.5),
+                                                     legend.position = 'none') 
+bic <- plot_pairwise('BIC') + ggtitle('AIC') + theme(plot.title = element_text(hjust = 0.5),
+                                                     legend.text = element_text(size = 7), 
+                                                     legend.key.size = unit(3, 'mm'))
 
-comp1 <- mod_fit %>% 
-  mutate(model = ifelse(model == 'Fixed', 'Model_1', ifelse(
-    model == 'Fixed_itc', 'Model_2', 'Baseline_model'))) %>%
-  pivot_longer(cols = c(AIC, BIC), names_to = 'Parameter', values_to = 'value') %>%
-  ggplot(aes(x = value, colour = model)) + geom_density(alpha = 0.6) +
-  facet_wrap(~Parameter) +
-  theme_bw() +
-  theme(axis.title.x = element_blank(),
-        legend.position = 'bottom')
+comp_mod <- arrangeGrob(aic, bic, nrow = 2, heights = c(0.45, 0.55))
+plot(comp_mod)
 
-comp1
+ggsave('BIC_AIC_violin.tiff', comp_mod, dpi = 300, unit = 'mm', width = 75, height = 120)
 
-ggsave('BIC_AIC_density.tiff', dpi = 300, unit = 'mm', width = 120, height = 70)
-
+# summarise AIC and BIC value distributions for each model
 mod_fit %>% group_by(model) %>% summarise(mean_AIC = mean(AIC),
+                                          sd_AIC = sd(AIC),
                                           mean_BIC = mean(BIC),
+                                          sd_BIC = sd(BIC),
                                           mean_r2 = mean(r2),
                                           median_AIC = median(AIC),
                                           median_BIC = median(BIC),
-                                          median_r2 = median(r2))
-#
+                                          median_r2 = median(r2),
+                                          mean_b = mean(Estimate),
+                                          med_b = median(Estimate))
 
-p1 <- mod_fit %>% 
-  mutate(model = ifelse(model == 'Fixed', 'Model_1', ifelse(
-    model == 'Fixed_itc', 'Model_2', 'Baseline_model'
-  ))) %>%
-  pivot_wider(id_cols = comp, names_from = model, values_from = AIC) %>%
-  ggplot(aes(y = Baseline_model, x = Model_1)) + 
-  #geom_point(alpha = 0.3, size = 2) +
-  stat_binhex() +
-  theme_bw() +
-  theme(legend.key.size = unit(5, 'mm')) +
-  coord_fixed() + geom_abline(intercept = 0, slope = 1, colour = 'red') +
-  ggtitle('AIC')
+mod_fit_w <- mod_fit %>% dplyr::select(comp, model, AIC, BIC) %>%
+  pivot_wider(names_from = model, values_from = c(AIC, BIC)) %>%
+  mutate(AIC_diff_BF = (AIC_Baseline - AIC_Final)/AIC_Baseline,
+         BIC_diff_BF = (BIC_Baseline - BIC_Final)/BIC_Baseline,
+         AIC_diff_BBni = (AIC_Baseline - AIC_Baseline_no_infl)/AIC_Baseline,
+         BIC_diff_BBni = (BIC_Baseline - BIC_Baseline_no_infl)/BIC_Baseline,
+         AIC_diff_BniF = (AIC_Baseline_no_infl - AIC_Final)/AIC_Baseline_no_infl,
+         BIC_diff_BniF = (BIC_Baseline_no_infl - BIC_Final)/BIC_Baseline_no_infl)
 
+hist(mod_fit_w$AIC_diff_BBni)
 
-p1
+median(mod_fit_w$AIC_diff_BF)
+median(mod_fit_w$BIC_diff_BF)
 
-p2 <- mod_fit %>% 
-  mutate(model = ifelse(model == 'Fixed', 'Model_1', ifelse(
-    model == 'Fixed_itc', 'Model_2', 'Baseline_model'
-  ))) %>%
-  pivot_wider(id_cols = comp, names_from = model, values_from = AIC) %>%
-  ggplot(aes(y = Model_1, x = Model_2)) + 
-  #geom_point(alpha = 0.3, size = 2) +
-  theme_bw() +
-  stat_binhex() +
-  theme(legend.key.size = unit(5, 'mm')) +
-  coord_fixed() + geom_abline(intercept = 0, slope = 1, colour = 'red') +
-  ggtitle('AIC')
+median(mod_fit_w$AIC_diff_BBni)
+median(mod_fit_w$BIC_diff_BBni)
 
+median(mod_fit_w$AIC_diff_BniF)
+median(mod_fit_w$BIC_diff_BniF)
 
-p2
-
-
-ggsave('AIC_model_comp2.tiff', p2, dpi = 300, unit = 'mm', width = 100, height = 70)
-
-#
-#
-#
-
-# compare the effect of including covariates on logBG slope estimation
-# Model 1 vs Baseline
-reg_results <- reg_results_pqn_infl %>%
-  filter(predictor == 'logBG') %>%
-  mutate(model = 'Mixed') %>%
-  rbind(reg_results1_pqn %>% 
-          filter(predictor == 'logBG') %>%
-          mutate(model = 'Fixed',
-                 CI_lwr = `2.5 %`,
-                 CI_upr = `97.5 %`,
-                 adj.p.value = p.adjust(p.value, method = 'BH')) %>%
-          dplyr::select(!c('2.5 %', '97.5 %')))
-
-# number of VOCs with significant effect of background across datasets
-m_sbg <- reg_results %>% filter(model == 'Mixed') %>% filter(adj.p.value < 0.05)
-f_sbg <- reg_results %>% filter(model == 'Fixed') %>% filter(adj.p.value < 0.05)
-
-m_sbg_only <- setdiff(m_sbg$comp, f_sbg$comp)
-f_sbg_only <- setdiff(f_sbg$comp, m_sbg$comp)
-both <- intersect(f_sbg$comp, m_sbg$comp)
-
-reg_results <- reg_results %>% 
-  mutate(Significant = ifelse(comp %in% m_sbg_only, 'Baseline', ifelse(
-    comp %in% f_sbg_only, 'Model_1', ifelse(
-      comp %in% both, 'Both', 'Neither'
-    )
-  )))
-
-table(reg_results$Significant)
-
-# slopes
-est <- reg_results %>% 
-  pivot_wider(id_cols = c(comp, Significant), names_from = model, values_from = Estimate) %>%
-  ggplot(aes(x = Fixed, y = Mixed)) + 
-  #geom_point() +
-  geom_hex() +
-  xlab('Model_1') + ylab('Baseline_model') +
-  geom_abline(intercept = 0, slope = 1) +
-  coord_fixed() +
-  theme_bw() +
-  ggtitle('Regression logBG coefficient') #+
-#geom_text(aes(label = comp))
-
-reg_results %>% ggplot(aes(x = model, y = Estimate, group = model)) + 
-  geom_violin() + geom_boxplot()
-
-reg_results <- reg_results %>% 
-  mutate(CI_width = CI_upr - CI_lwr)
-
-# confidence intervals
-ci <- reg_results %>%
-  pivot_wider(id_cols = c(comp, Significant), names_from = model, values_from = CI_width) %>%
-  ggplot(aes(x = Fixed, y = Mixed)) + 
-  #geom_point() +
-  geom_hex() +
-  xlab('Model_1') + ylab('Baseline_model') +
-  geom_abline(intercept = 0, slope = 1) +
-  coord_fixed() +
-  theme_bw() +
-  ggtitle('Regression logBG 95% CI width')
-
-reg_results %>% 
-  ggplot(aes(x = model, y = CI_width, group = model)) + 
-  geom_violin() + geom_boxplot()
-
-reg_results %>% 
-  ggplot(aes(x = adj.p.value, fill = model)) + 
-  geom_histogram(position = 'identity', alpha = 0.6)
-
-# save figures
-baseline_vs_m1 <- arrangeGrob(est, ci, nrow = 1)
-plot(baseline_vs_m1)
-ggsave('Baseline_vs_M1_Est_CI.tiff', baseline_vs_m1, dpi = 300, unit = 'mm', width = 160, height = 80)
-
-
-# visualise effect of asthma based on confidence and effect size
-# calculation of fold change (not useful?)
-hist(asthma_pred_b$p.value, breaks = 30)
-sd(asthma_pred_b$p.value)
-
-asthma_pred_b <- asthma_pred_b %>%
-  mutate(lab = ifelse(p.value < 0.05 & Estimate > 0.4, comp, ifelse(
-    p.value < 0.05 & Estimate < -0.4, comp, NA))) %>%
-  mutate(col = ifelse(is.na(lab) == TRUE, 'no', 'yes'))
-
-vol_plot <- asthma_pred_b %>%
-  ggplot(aes(y = -log10(p.value), x = Estimate)) +
-  geom_point(aes(colour = col)) +
-  geom_vline(xintercept = c(-0.4, 0.4), linetype = 'dashed', colour = 'darkgrey') +
-  geom_hline(yintercept = 1.3, linetype = 'dashed', colour = 'darkgrey') +
-  theme_bw() +
-  geom_text_repel(aes(label = lab), size = 2) +
-  theme(legend.position = 'none',
-        plot.title = element_text(hjust = 0.5, size = 12)) +
-  scale_colour_manual(values = c('yes' = 'red',
-                                 'no' = 'black')) +
-  ggtitle('Volcano plot showing effect of asthma diagnosis on breath VOCs in Dataset 2') +
-  xlim(-1, 1) +
-  xlab('partial regression coefficient')
-
-vol_plot
-
-ggsave('Volcano_asthma.tiff', dpi = 300, unit = 'mm', width = 150, height = 120)
-
-##############################
-##############################
-
-#
-#
-#
-
-# APPLYING BG CORRECTION
-## use linear regression coefficients to correct the background signal
-b1_imp_sum_corr <- b1_imp_sum_c %>%
-  filter(CoreVisit %in% c('CV1', 'CV2')) %>%
-  left_join(reg_results1_b %>%
-              filter(predictor == 'logBG') %>%
-              mutate(adj.p.value = p.adjust(p.value, method = 'BH')) %>%
-              dplyr::select(comp, Estimate, '2.5 %', '97.5 %', adj.p.value)) %>%
-  mutate(logS_adj = ifelse(adj.p.value > 0.05 | is.na(adj.p.value), log(S), # account for VOCs with missing BG info
-                           log(S) - Estimate*log(BG)))
-
-colnames(b1_imp_sum_corr)[10] <- 'CI_lwr'
-colnames(b1_imp_sum_corr)[11] <- 'CI_upr'
-
-#
-b_imp_sum_corr <- b_imp_sum_c %>%
-  filter(CoreVisit %in% c('CV1', 'CV2')) %>%
-  left_join(reg_results1_b %>%
-              filter(predictor == 'logBG') %>%
-              mutate(adj.p.value = p.adjust(p.value, method = 'BH')) %>%
-              dplyr::select(comp, Estimate, '2.5 %', '97.5 %', adj.p.value)) %>%
-  mutate(logS_adj = ifelse(adj.p.value > 0.05 | is.na(adj.p.value), log(S),
-                           (log(S) - Estimate*log(BG))))
-
-colnames(b_imp_sum_corr)[11] <- 'CI_lwr'
-colnames(b_imp_sum_corr)[12] <- 'CI_upr'
-
-# exclude VOCs where 95% CI for logBG coefficient includes 1 
-excl <- b_imp_sum_corr %>%
-  filter(is.na(Estimate) == FALSE & CI_upr > 1 ) 
-
-b1_imp_sum_corr <- b1_imp_sum_corr %>%
-  filter(comp %ni% excl$comp)
-b_imp_sum_corr <- b_imp_sum_corr %>%
-  filter(comp %ni% excl$comp)
-
-# BG-CORRECTED OUTPUT
-write.csv(b1_imp_sum_corr, 'RADicA_B1_BG_adjusted.csv')
-write.csv(b_imp_sum_corr, 'RADicA_B2_BG_adjusted.csv')
-
-#
-#
-#
-
-# Principal Component Analysis of corrected and uncorrected breath data
-# transform to wide format
-pivot_wide <- function(data, column){
-  data_w <- data %>% 
-  left_join(meta %>% dplyr::select(RAD_ID, Diagnosis)) %>%
-  distinct() %>%
-  dplyr::select(c(Sample, comp, logS_adj, Diagnosis, CoreVisit, RAD_ID)) %>%
-  pivot_wider(names_from = comp, values_from = logS_adj) %>% 
-  as.data.frame()
-}
-
-b1_imp_sum_corr_w <- pivot_wide(data = b1_imp_sum_corr, column = 'logS_adj')
-rownames(b1_imp_sum_corr_w) <- b1_imp_sum_corr_w$Sample
-
-b_imp_sum_corr_w <- pivot_wide(data = b_imp_sum_corr, column = 'logS_adj')
-rownames(b_imp_sum_corr_w) <- b_imp_sum_corr_w$Sample
-
-# exclude VOCs considered exogenous based on logFC
-exo <- reg_valid_join %>% filter(FC_filter == 'Exo')
-exo <- unique(exo$comp)
-
-b1_endo <- b1_imp_sum_corr_w %>% dplyr::select(!exo)
-b2_endo <- b_imp_sum_corr_w %>% dplyr::select(!exo)
-
-
-# 
-pca_cv12 <- function(data){
-  assay <- data[,-c(1:4)]
-  pc <- pca(assay, center = TRUE, scale = TRUE, ncomp = 4)
-  #multilevel = b1_sub_corr1_w$RAD_ID)
-  pc_plot <- plotIndiv(pc,
-                #pch = 1,
-                #ind.names = data$RAD_ID,
-                group = data$Diagnosis,
-                legend = TRUE,
-                comp = c(1,2),
-                pch = as.factor(data$CoreVisit),
-                size.title = 10,
-                title = 'Breath sample VOCs',
-                cex = 3)
-}
-
-pc_plot1 <- pca_cv12(b1_imp_sum_corr_w1)
-pc_plot_unc1 <- pca_cv12(b1_imp_sum_w)
-pc_plot1_endo <- pca_cv12(b1_endo)
-
-pc_plot <- pca_cv12(b_imp_sum_corr_w1)
-pc_plot_unc <- pca_cv12(b_imp_sum_w)
-pc_plot_endo <- pca_cv12(b2_endo)
-
-# Each CV separately
-pca_cv1 <- function(data){
-  cv1 <- data %>% filter(CoreVisit == 'CV1')
-  assay1 <- cv1[,-c(1:4)]
-  pc1 <- pca(assay1, center = TRUE, scale = TRUE, ncomp = 4)
-  pc_plot1 <- plotIndiv(pc1,
-                     pch = 1,
-                     #ind.names = cv1$Sample,
-                     group = cv1$Diagnosis,
-                     #legend = TRUE,
-                     comp = c(1,2),
-                     size.title = 10,
-                     title = 'Core Visit 1',
-                     cex = 1.5)
-}
-
-pc_plot1_b1 <- pca_cv1(b1_imp_sum_corr_w)
-pc_plot1_unc_b1 <- pca_cv1(b1_imp_sum_w)
-
-pc_plot1 <- pca_cv1(b_imp_sum_corr_w)
-pc_plot1_unc <- pca_cv1(b_imp_sum_w)
+wilcox.test(mod_fit_w$AIC_Baseline, mod_fit_w$AIC_Baseline_no_infl, paired = TRUE)
 
 #
 
-pca_cv2 <- function(data) {
-  cv2 <- data %>% filter(CoreVisit == 'CV2')
-  assay2 <- cv2[,-c(1:4)]
-  pc2 <- pca(assay2, center = TRUE, scale = TRUE, ncomp = 4)
-  pc_plot2 <- plotIndiv(pc2,
-                     pch = 1,
-                     #ind.names = cv2$Sample,
-                     group = cv2$Diagnosis,
-                     #legend = TRUE,
-                     comp = c(1,2),
-                     size.title = 10,
-                     title = 'Core Visit 2',
-                     cex = 1.5)
-}
-
-#
-
-pc_plot2_b1 <- pca_cv2(b1_imp_sum_corr_w)
-pc_plot2_unc_b1 <- pca_cv2(b1_imp_sum_w)
-
-pc_plot2_b2 <- pca_cv2(b_imp_sum_corr_w)
-pc_plot2_unc_b2 <- pca_cv2(b_imp_sum_w)
-
-#
-
-pca_plots <- plot_grid(pc_plot$graph, pc_plot1$graph, pc_plot2$graph, nrow = 1, align = 'h',
-                       rel_widths = c(0.41, 0.295, 0.295))
-pca_plots
-
-ggsave('PCA_regression_corrected.tiff', pca_plots, dpi = 300, unit = 'mm', width = 300, height = 80)
-
-#
-
-pca_plots_unc <- plot_grid(pc_plot_unc$graph, pc_plot1_unc$graph, pc_plot2_unc$graph, nrow = 1, align = 'h',
-                       rel_widths = c(0.41, 0.295, 0.295))
-pca_plots_unc
-
-ggsave('PCA_regression_uncorrected.tiff', pca_plots_unc, dpi = 300, unit = 'mm', width = 300, height = 80)
+# number of VOCs with significant effect of background
+base_results_b2_sign <- base_results_b2 %>% filter(adj.p.value < 0.05)
+base_results_b2_infl_sign <- base_results_b2_infl %>% filter(adj.p.value < 0.05)
 
 
-#
+venn <- venn.diagram(
+  x = list(base_results_b2_sign$comp, 
+           base_results_b2_infl_sign$comp,
+           fin_results_b2_bg_sign$comp),
+  category.names = c('Baseline', 'Baseline \n w/o outliers', 'Final'),
+  filename = 'Venn_mixed_reg_sign.png',
+  output = TRUE,
+  cex = 1.2,
+  fontface = 'bold',
+  cat.cex = 1.2,
+  cat.fontface = 'bold',
+  cat.default.pos = "outer",
+  fill = c('pink', 'grey', 'lightblue'),
+  fontfamily = "sans",
+  cat.fontfamily = 'sans',
+  margin = 0.07,
+  cat.dist = c(0.08, 0.12, 0.06),
+  main = 'Number of VOCs with significant logBG effect',
+  main.cex = 1.2,
+  main.fontface = 'bold',
+  main.fontfamily = 'sans',
+  main.just = c(0.5, -0.5),
+  resolution = 300,
+  height = 120,
+  width = 120,
+  units = 'mm'
+)
 
-out <- infl_obs %>% group_by(Sample) %>% summarise(n = n())
+# plot of regression coefficients and r2
+pals <- grafify::graf_palettes
+my_pal = pals$fishy
+swatch(my_pal)
 
-out_s <- data.frame(Sample = c('191206_RaDICA_RAD078', '191018_RaDICA_RAD056', '190823_RaDICA_RAD022', 
-           '190828_RaDICA_RAD016', '190828_RaDICA_RAD022', '190813_RaDICA_RAD012'),
-           obs = c(61, 44, 20, 21, 23, 15))
-
-out_s <- out_s %>% left_join(out)
-
-#
-#
-#
-
-# OUTLIER DETECTION
-# detect multivariate outliers using robust PCA
-data <- b1_endo
-
-assay <- data[,-c(1:4)]
-Rpc <- PCAgrid(assay, scale = 'sd', center = 'mean')
-sdod <- PCdiagplot(assay, Rpc, plotbw = FALSE, crit = 0.98)
-# identify outliers based on the critical OD and SD values 
-sd <- as.data.frame(sdod$SDist)
-rownames(sd) <- rownames(assay)
-sdOut <- sd %>% filter(V1 > sdod$critSD[1,1] & V2 > sdod$critSD[2,1])
-
-od <- as.data.frame(sdod$ODist)
-rownames(od) <- rownames(assay)
-odOut <- od %>% filter(V1 > sdod$critOD[1,1] & V2 > sdod$critOD[2,1])
-
-outliers <- c(rownames(odOut), rownames(sdOut)) %>% unique()
-
-distances <- od %>% 
-  mutate(Sample = rownames(.)) %>%
-  pivot_longer(cols = c(V1, V2), names_to = 'k', values_to = 'OD') %>%
-  left_join(sd %>% 
-              mutate(Sample = rownames(.)) %>%
-              pivot_longer(cols = c(V1, V2), names_to = 'k', values_to = 'SD')) %>%
-  left_join(as.data.frame(data$Sample) %>%
-            rename(Sample = 'data$Sample') %>%
-              mutate(obs = rownames(.))) %>%
-  mutate(outliers = ifelse(Sample %in% outliers, 'yes', 'no'),
-         outlier_obs = ifelse(outliers == 'yes', Sample, NA))
-
-distances %>%
-  filter(k == 'V1') %>%
-  ggplot(aes(x = OD, y = SD, colour = outliers)) +
-  geom_point() +
-  geom_hline(yintercept = sdod$critSD[1,1], linetype = 'dashed') +
-  geom_vline(xintercept = sdod$critOD[2,1], linetype = 'dashed') +
-  theme_bw() +
-  geom_text_repel(aes(label = outlier_obs), colour = 'black') +
-  ylab('score distance') + xlab('orthogonal distance') +
-  ggtitle('Diagnostic plot to the PCA \n on corrected breath sample VOCs \n (Dataset 1)') +
-  theme(plot.title = element_text(hjust = 0.5)) +
-  scale_colour_manual(values = c('no' = 'black',
-                                 'yes' = 'red'))
-
-
-ggsave('PCA_diagnostic_plot_B1.tiff', dpi = 300, unit = 'mm', width = 100, height = 80)
-
-View(b2_endo %>% filter(Sample %in% outliers))
-
-# PCA following outlier removal
-b1_endo1 <- b1_endo %>% filter(Sample %ni% outliers)
-b2_endo1 <- b2_endo %>% filter(Sample %ni% outliers)
-
-b1_imp_sum_corr_w1 <- b1_imp_sum_corr_w %>% filter(Sample %ni% outliers)
-b_imp_sum_corr_w1 <- b_imp_sum_corr_w %>% filter(Sample %ni% outliers)
-
-b1_endo1 <- b1_imp_sum_corr_w1 %>% dplyr::select(!exo)
-b2_endo1 <- b_imp_sum_corr_w1 %>% dplyr::select(!exo)
-
-write.csv(b1_imp_sum_corr_w1, 'RADicA_BG_adjusted_B1_outl_removed.csv')
-write.csv(b_imp_sum_corr_w1, 'RADicA_BG_adjusted_B2_outl_removed.csv')
-
-pca_cv12 <- function(data){
-  assay <- data[,-c(1:4)]
-  pc <- mixOmics::pca(assay, center = TRUE, scale = TRUE, ncomp = 2)
-  #multilevel = b1_sub_corr1_w$RAD_ID)
-  pc_plot <- plotIndiv(pc,
-                       #pch = 1,
-                       ind.names = data$RAD_ID,
-                       group = data$Diagnosis,
-                       legend = TRUE,
-                       comp = c(1,2),
-                       #pch = as.factor(data$CoreVisit),
-                       size.title = 10,
-                       title = 'Dataset 2',
-                       cex = 3#1.5
-                       )
-}
-
-
-
-dev.new()
-pc_plot_out_b1 <- pca_cv12(b1_imp_sum_corr_w1)
-pc_plot_out_b1 <- pca_cv12(b1_endo)
-
-pc_plot_out <- pca_cv12(b_imp_sum_corr_w1)
-pc_plot_out <- pca_cv12(b2_endo)
-
-pc_plots_out <- arrangeGrob(pc_plot_out_b1$graph, pc_plot_out$graph, ncol = 1,
-                            top = textGrob('PCA of breath sample VOCs'))
-plot(pc_plots_out)
-ggsave('PCA_corr_out_B1B2.tiff', pc_plots_out, dpi = 300, unit = 'mm', width = 120, height = 160)
-
-
-
-#
-pc_corr_b1 <- pca(b1_imp_sum_corr_w1[,-c(1:4)], scale = TRUE, center = TRUE)
-pc_corr_b2 <- pca(b_imp_sum_corr_w1[,-c(1:4)], scale = TRUE, center = TRUE) 
-
-pc_corr_b1_endo <- pca(b1_endo[,-c(1:4)], scale = TRUE, center = TRUE)
-pc_corr_b2_endo <- pca(b2_endo[,-c(1:4)], scale = TRUE, center = TRUE) 
-
-score_boxplot <- function(pc, data, PC){
-  scores <- {{pc}}$variates$X %>% as.data.frame() %>% mutate(Sample = rownames(.)) %>%
-    left_join(data %>% dplyr::select(Sample, Diagnosis)) %>%
-    dplyr::select(Sample, Diagnosis, PC)
-  colnames(scores)[3] <- 'PC'
+fin_res_plot <- fin_results_b2_bg %>%
+  dplyr::select(comp, r2, Estimate, p.value) %>%
+  mutate(adj.p.value = p.adjust(p.value, method = 'BH'),
+         sign = ifelse(adj.p.value < 0.05, '< 0.05', '> 0.05')) %>%
+  ggplot(aes(x = r2, y = Estimate, colour = sign)) + 
+  geom_point(size = 0.8, alpha = 0.6) +
+  xlim(0, NA) + ylim(0, NA) +
+  theme_bw(base_size = 10) +
+  scale_colour_manual(name = 'adj.p value',
+                      values = c('> 0.05' = my_pal[[7]],
+                                 '< 0.05' = 'black')) +
+  ylab('Regression coefficient') +
+  ggtitle('Results of the final mixed-effect model') +
+  theme(plot.title = element_text(hjust = 0.5),
+        legend.key.size = unit(3, 'mm'))
   
-  box <- scores %>% ggplot(aes(x = Diagnosis, y = PC)) + geom_boxplot() +
-    ylab(PC)
-  plot(box)
+ggsave('Final_model_r2VSbeta.tiff', units = 'mm', width = 85, height = 60)
+
+quantile(fin_results_b2_bg_sign$Estimate)
+quantile(fin_results_b2_bg_sign$r2)
+
+# relationship between linear model outputs and VOC origin annotation
+fin_results_b2_bg_class <- fin_results_b2_bg %>% 
+  left_join(endo_exo %>% filter(wilcox_filter != 'Neither_dataset')) %>%
+  mutate(bg_sign = ifelse(comp %in% fin_results_b2_bg_sign$comp, 'adj.p < 0.05', 'adj.p > 0.05'))
+
+
+fin_class_sum <- fin_results_b2_bg_class %>%
+  group_by(bg_sign, FC_filter) %>%
+  summarise(n = n()/n_distinct(fin_results_b2_bg$comp)*100) 
+
+fin_class_sum
   
-  scores %>% mutate(PCpos = ifelse(PC > 0, 'yes', 'no')) %>%
-  group_by(PCpos, Diagnosis) %>%
-  summarise(n = n())
-
-  }
-
-score_boxplot(pc_corr_b2, b_imp_sum_corr_w1, 'PC2')
-score_boxplot(pc_corr_b2_endo, b2_endo1, 'PC1')
-
-loads_fun <- function(pc, data, PC) {
-  loads <- {{pc}}$loadings$X %>% as.data.frame() %>% mutate(comp = rownames(.)) %>%
-  dplyr::select(PC, comp) %>%
-  left_join(reg_valid_join %>% dplyr::select(comp, FC_filter, wilcox_filter, sign)) %>%
-  mutate(comp = str_trunc(comp, 34)) %>%
-  distinct() %>%
-  mutate(FC_filter = ifelse(is.na(FC_filter), 'Unknown', FC_filter)) %>%
-  rename(BGcorr = sign)
-  colnames(loads)[1] <- 'PC'
-  
-  loads %>% arrange(desc(abs(PC))) %>%
-  slice(1:15) %>%
-  ggplot(aes(x = PC, y = fct_inorder(as.factor(comp)), fill = FC_filter, colour = BGcorr)) + 
+fin_class_sum %>%
+  ggplot(aes(x = bg_sign, y = n/n_distinct(fin_results_b2_bg$comp)*100, fill = FC_filter)) +
   geom_col() +
-  theme_bw() + scale_fill_brewer(palette = 'Set2') +
-  xlab(PC) +
-  theme(axis.title.y = element_blank()#,
-  #legend.position = 'none'
-  )
-  }
-
-b1p1 <- loads_fun(pc_corr_b1, b1_imp_sum_corr_w1, 'PC1')
-b1p2 <- loads_fun(pc_corr_b1, b1_imp_sum_corr_w1, 'PC2')
-
-b1p1
-
-b1ps <- arrangeGrob(b1p1, b1p2, nrow = 1, top = textGrob('Dataset 1 loadings', hjust = 1),
-                    widths = c(0.38, 0.62))
-plot(b1ps)
-ggsave('PCA_loadings_B1_corr.tiff', b1ps, dpi = 300, 
-       unit = 'mm', width = 200, height = 80)
-
-#
-
-b2p1 <- loads_fun(pc_corr_b2, b_imp_sum_corr_w1, 'PC1')
-b2p2 <- loads_fun(pc_corr_b2, b_imp_sum_corr_w1, 'PC2')
-
-b2ps <- arrangeGrob(b2p1, b2p2, nrow = 1, top = textGrob('Dataset 2 loadings', hjust = 0.3),
-                    widths = c(0.5, 0.5))
-plot(b2ps)
-ggsave('PCA_loadings_B2_corr.tiff', b2ps, dpi = 300, 
-       unit = 'mm', width = 160, height = 80)
-
-#
-
-loads_fun(pc_corr_b2_endo, b2_endo, 'PC1')
-
-ggsave('PCA_loadings_B2_corr.tiff', b2_pc2, dpi = 300, unit = 'mm', width = 130, height = 80)
+  theme_bw() +
+  ylab('% VOCs') +
+  xlab('Background effect')
 
 #
 #
 #
 
-# hierarchical clustering of corrected breath samples
-library(stats)
-
-names <- paste(b1_imp_sum_corr_w1$RAD_ID, b1_imp_sum_corr_w1$CoreVisit, b1_imp_sum_corr_w1$Diagnosis,
-               sep = '_')
-
-rownames(b1_imp_sum_corr_w1) <- names
-
-d_matrix <- dist(b1_imp_sum_corr_w1[,-c(1:4)], method = 'euclidean')
-clust <- hclust(d_matrix)
-dev.new()
-plot(clust)
-
-
-#
-#
-#
+################################
 
 # MODEL VALIDATION
-# validation of regression model prediction on B1
-b12_voc <- unique(b_imp_sum_c$comp)
-
-b_imp_sum_c <- b_imp_sum_c %>% left_join(meta %>% dplyr::select(RAD_ID, Diagnosis)) %>%
-  distinct()
-
-b1_imp_sum_c <- b1_imp_sum_c %>% left_join(meta %>% dplyr::select(RAD_ID, Diagnosis)) %>%
-  distinct()
-                              
-reg_valid_base <- bind_rows(lapply(b12_voc, function(voc) {
-  sub_train <- b_imp_sum_c %>%
-      filter(comp == voc) %>%
-      filter(CoreVisit %in% c('CV1', 'CV2')) %>%
-      drop_na() %>%
-      mutate(logS = log(S), logBG = log(BG)) %>%
-      #mutate(SlogS = logS/sd(logS, na.rm = TRUE), # code for standarised regression coefficients
-      #SlogBG = logBG/sd(logBG, na.rm = TRUE)) %>%
-      left_join(infl_obs) %>% # code to exclude influential points based on deletion diagnostics
-      mutate(obs = ifelse(is.na(obs) == TRUE, NA, 'infl')) %>%
-      filter(obs %ni% c('infl'))
-  
-  sub_test <- b1_imp_sum_c %>%
+# Validation of regression models prediction in test dataset
+# Baseline model validation
+base_valid <- function(train, test){
+  bind_rows(lapply(unique(train$comp), function(voc) {
+  sub_train <- train %>%
     filter(comp == voc) %>%
-    filter(CoreVisit %in% c('CV1', 'CV2')) %>%
     drop_na() %>%
-    mutate(logS = log(S), logBG = log(BG)) %>%
-    distinct() 
-    
-    model <- lmer(logS ~ logBG + Diagnosis + CoreVisit + (1 | RAD_ID),
-                  data = sub_train)
-    
-    #model <- lmer(SlogS ~ logBG + Diagnosis + CoreVisit + (1 | RAD_ID), # code for standarised regression coefficients
-    #data = subset)
-    
-    pred_test <- sub_test %>% 
-      mutate(logSpred = predict(model, newdata = sub_test, allow.new.levels = TRUE),
-             error = logSpred - logS)
-    
-    perf <- data.frame(mse = mean((pred_test$error)^2),
-                       mae = mean(abs(pred_test$error)),
-                       me = mean(pred_test$error),
-                       mape = mean(abs(pred_test$error/pred_test$logSpred)*100),
-                       comp = voc)
-    
-}))
-
-#
-
-reg_valid_out1 <- reg_valid_out %>% 
-  left_join(reg_results1_b %>% filter(predictor == 'logBG') %>%
-              mutate(adj.p.value = p.adjust(p.value, method = 'BH')))
-
-reg_valid_out_sign <- reg_valid_out1 %>% filter(adj.p.value < 0.05)
-
-# error for the baseline model
-reg_valid_base1 <- reg_valid_base %>% 
-  left_join(reg_results1_b %>% filter(predictor == 'logBG') %>%
-              mutate(adj.p.value = p.adjust(p.value, method = 'BH')))
-
-reg_valid_base_sign <- reg_valid_base1 %>% filter(adj.p.value < 0.05)
-
-plot(reg_valid_base_sign$mae, reg_valid_out_sign$mae) + abline(0,1)
-
-hist(reg_valid_base_sign$mae - reg_valid_out_sign$mae)
-
-median(reg_valid_base_sign$mae)
-median(reg_valid_out_sign$mae)
-median(reg_valid_null_sign$mae)
-
-hist(reg_valid_join$)
-
-# error for the null model
-reg_valid_null <- bind_rows(lapply(b12_voc, function(voc) {
-  sub_train <- b_imp_sum_c %>%
-    filter(comp == voc) %>%
-    filter(CoreVisit %in% c('CV1', 'CV2')) %>%
-    drop_na() %>%
-    mutate(logS = log(S), logBG = log(BG)) %>%
-    #mutate(SlogS = logS/sd(logS, na.rm = TRUE), # code for standarised regression coefficients
-    #SlogBG = logBG/sd(logBG, na.rm = TRUE)) %>%
-    left_join(infl_obs) %>% # code to exclude influential points based on deletion diagnostics
-    mutate(obs = ifelse(is.na(obs) == TRUE, NA, 'infl')) %>%
-    filter(obs %ni% c('infl'))
+    mutate(logS = log(S), logBG = log(BG)) #%>%
+    #left_join(infl_obs) %>% # code to exclude influential points based on deletion diagnostics
+    #mutate(obs = ifelse(is.na(obs) == TRUE, NA, 'infl')) %>%
+    #filter(obs %ni% c('infl'))
   
-  sub_test <- b1_imp_sum_c %>%
+  sub_test <- test %>%
     filter(comp == voc) %>%
-    filter(CoreVisit %in% c('CV1', 'CV2')) %>%
     drop_na() %>%
     mutate(logS = log(S), logBG = log(BG)) %>%
     distinct() 
   
-  model <- lmer(logS ~ 1 + (1 | RAD_ID),
+  model <- lmer(logS ~ logBG + (1 | RAD_ID),
                 data = sub_train)
-  
-  #model <- lmer(SlogS ~ logBG + Diagnosis + CoreVisit + (1 | RAD_ID), # code for standarised regression coefficients
-  #data = subset)
   
   pred_test <- sub_test %>% 
     mutate(logSpred = predict(model, newdata = sub_test, allow.new.levels = TRUE),
@@ -1637,227 +642,342 @@ reg_valid_null <- bind_rows(lapply(b12_voc, function(voc) {
                      me = mean(pred_test$error),
                      mape = mean(abs(pred_test$error/pred_test$logSpred)*100),
                      comp = voc)
-  
-}))
+  }))
+  }
 
+# Fit baseline model to test dataset
+base_results_b1 <- base_valid(b2_imp_sum, b1_imp_sum)
 
-reg_valid_null1 <- reg_valid_null %>% 
-  left_join(reg_results1_b %>% filter(predictor == 'logBG') %>%
-              mutate(adj.p.value = p.adjust(p.value, method = 'BH')))
-
-reg_valid_null_sign <- reg_valid_null1 %>% filter(adj.p.value < 0.05)
-
-plot(reg_valid_out_sign$mape, reg_valid_null_sign$mape, xlab = 'Trained model', ylab = 'Null model', cex.main = 0.9,
-     cex.lab = 0.9, cex = 0.8,
-     main = 'Mean absolute percentage error') + 
-  abline(0,1, col = 'red', lwd = 2)
-
-
-hist(reg_valid_null$mae - reg_valid_out$mae)
-hist(reg_valid_null$mape - reg_valid_out$mape)
-
-par(mfrow = c(3,1))
-hist(reg_valid_out_sign$me, main = 'Mean error', xlab = '')
-hist(reg_valid_out_sign$mae, main = 'Mean absolute error', xlab = '')
-hist(reg_valid_out_sign$mape, main = 'Mean absolute percentage error', xlab = '')
+# Fit baseline model trained without influential observations to test dataset
+# activate code excluding outliers in the function body above
+base_results_b1_infl <- base_valid(b2_imp_sum, b1_imp_sum)
 
 #
 
-# compare error to p value and regression estimate
-# effect of different filtering strategies for endogenous VOCs on regression results
-reg_valid_out <- reg_valid_out %>% mutate(model = 'Model1')
-reg_valid_base <- reg_valid_base %>% mutate(model = 'Baseline')
-reg_valid_null <- reg_valid_null %>% mutate(model = 'Null')
+# Final model validation
+fin_valid <- function(train, test){
+  bind_rows(lapply(unique(train$comp), function(voc) {
+    sub_train <- train %>%
+      filter(comp == voc) %>%
+      drop_na() %>%
+      mutate(logS = log(S), logBG = log(BG)) %>%
+      left_join(infl_obs) %>% # code to exclude influential points based on deletion diagnostics
+      mutate(obs = ifelse(is.na(obs) == TRUE, NA, 'infl')) %>%
+      filter(obs %ni% c('infl'))
+    
+    sub_test <- test %>%
+      filter(comp == voc) %>%
+      drop_na() %>%
+      mutate(logS = log(S), logBG = log(BG)) %>%
+      distinct() 
+    
+    model_fin <- lmer(logS ~ logBG + Diagnosis + CoreVisit + (1 | RAD_ID),
+                  data = sub_train)
+    
+    pred_test_fin <- sub_test %>% 
+      mutate(logSpred = predict(model_fin, newdata = sub_test, allow.new.levels = TRUE),
+             error = logSpred - logS)
+    
+    perf <- data.frame(mse = mean((pred_test_fin$error)^2),
+                       mae = mean(abs(pred_test_fin$error)),
+                       me = mean(pred_test_fin$error),
+                       mape = mean(abs(pred_test_fin$error/pred_test_fin$logSpred)*100),
+                       comp = voc)
+  }))
+}
 
-reg_valid_join <- rbind(reg_valid_out, #reg_valid_base, 
-                        reg_valid_null) %>%
-  full_join(reg_results1_b %>% 
-              filter(predictor == 'logBG') %>%
-              mutate(adj.p.value = p.adjust(p.value, method = 'BH'))) %>%
-  mutate(sign = ifelse(adj.p.value < 0.05, 'yes', 'no')) %>%
-  left_join(keep_wilcox_max)
+# join with clinical metadata
+b2_imp_sum_annot <- b2_imp_sum %>% left_join(meta %>% dplyr::select(RAD_ID, Diagnosis)) %>% distinct() 
+b1_imp_sum_annot <- b1_imp_sum %>% left_join(meta %>% dplyr::select(RAD_ID, Diagnosis)) %>% distinct() 
 
-write.csv(reg_valid_join, 'RegValid_results.csv')
+# Fit final model to test dataset
+fin_results_b1 <- fin_valid(b2_imp_sum_annot, b1_imp_sum_annot)
 
-# effect on regression results (dataset 2)
-# p-value
-reg_valid_join %>% group_by(wilcox_filter, sign) %>% summarise(n = n())
+#
 
-  reg_valid_join %>%
-  filter(model == 'Model1') %>%
-  mutate(adj.p.value = -log10(adj.p.value)) %>%
-  pivot_longer(cols = c(r2, adj.p.value), names_to = 'parameter', values_to = 'value') %>%
-  ggplot(aes(y = value, x = wilcox_filter, colour = FC_filter)) +
-  facet_wrap(~ parameter, scale = 'free') +
-  geom_violin(position = position_dodge(width = 0.9)) +
-  geom_boxplot(position = position_dodge(width = 0.9), width = 0.15, outliers = FALSE) +
-  theme_bw(base_size = 10) +
-  geom_hline(data = data.frame(yint = -log10(0.05), 
-                               parameter = "adj.p.value"), 
-             aes(yintercept = yint), linetype = "dashed") +
-  ggtitle('Model results in Dataset 2 (training)') +
-    theme(plot.title = element_text(hjust = 0.5, size = 10)) +
-  scale_colour_brewer(palette = 'Set2') +
-    ylab('-log10(adj.p.value)')
+# Fit null model (intercept only)
+null_valid <- function(train, test) {
+  bind_rows(lapply(unique(train$comp), function(voc) {
+    sub_train <- train %>%
+      filter(comp == voc) %>%
+      drop_na() %>%
+      mutate(logS = log(S), logBG = log(BG)) %>%
+      left_join(infl_obs) %>% # code to exclude influential points based on deletion diagnostics
+      mutate(obs = ifelse(is.na(obs) == TRUE, NA, 'infl')) %>%
+      filter(obs %ni% c('infl'))
+    
+    sub_test <- test %>%
+      filter(comp == voc) %>%
+      drop_na() %>%
+      mutate(logS = log(S), logBG = log(BG)) %>%
+      distinct() 
+    
+    model_null <- lm(logS ~ 1,
+                data = sub_train)
+    
+    
+    pred_test_null <- sub_test %>% 
+      mutate(logSpred = predict(model_null, newdata = sub_test, allow.new.levels = TRUE),
+             error = logSpred - logS)
+    
+    perf <- data.frame(mse = mean((pred_test_null$error)^2),
+                       mae = mean(abs(pred_test_null$error)),
+                       me = mean(pred_test_null$error),
+                       mape = mean(abs(pred_test_null$error/pred_test_null$logSpred)*100),
+                       comp = voc)
+  }))
+}
 
-ggsave('RegRes_vs_filtering.tiff', dpi = 300, unit = 'mm', width = 170, height = 60)
+#
+null_results_b1 <- null_valid(b2_imp_sum, b1_imp_sum)
+
+# compare prediction error in test dataset across three models
+# examine only VOCs where effect of background considered significant
+valid_results <- base_results_b1 %>%
+  pivot_longer(cols =! comp, names_to = 'error', values_to = 'value') %>%
+  mutate(model = 'Baseline') %>%
+  rbind(base_results_b1_infl %>%
+          pivot_longer(cols =! comp, names_to = 'error', values_to = 'value') %>%
+          mutate(model = 'Baseline_no_infl')) %>%
+  rbind(fin_results_b1 %>%
+          pivot_longer(cols =! comp, names_to = 'error', values_to = 'value') %>%
+          mutate(model = 'Final')) %>%
+  rbind(null_results_b1 %>%
+          pivot_longer(cols =! comp, names_to = 'error', values_to = 'value') %>%
+          mutate(model = 'Null')) %>%
+  filter(error != 'mse') %>%
+  filter(comp %in% fin_results_b2_bg_sign$comp)
+
+valid_results %>% pivot_wider(names_from = 'error', values_from = 'value') %>%
+  ggplot(aes(x = model, y = mae, group = model)) + geom_violin() + 
+  geom_boxplot(outliers = FALSE, width = 0.1)  
+
+valid_results %>% pivot_wider(names_from = 'error', values_from = 'value') %>%
+  group_by(model) %>% 
+  summarise(med_mae = median(mae),
+            iqr_mae = IQR(mae),
+            med_mape = median(mape),
+            iqr_mape = IQR(mape),
+            med_me = median(me),
+            iqr_me = IQR(me))
+
+valid_results %>% 
+  filter(model %in% c('Final', 'Null')) %>%
+  filter(error %ni% c('mse', 'me')) %>%
+  ggplot(aes(x = model, y = value)) + 
+  geom_violin() +
+  geom_boxplot(width = 0.4, outliers = FALSE) +
+  facet_wrap(~ error, scale = 'free') +
+  theme_bw() 
 
 
-# effect on prediction error
-reg_valid_join %>%
-  filter(adj.p.value < 0.05) %>%
-  filter(model == 'Model1') %>%
-  filter(mae < 4) %>%
-  pivot_longer(cols = c(mae, mape), names_to = 'error', values_to = 'value') %>%
-  ggplot(aes(y = value, x = wilcox_filter, colour = FC_filter)) +
-  facet_wrap(~error, scale = 'free') +
-  geom_violin(position = position_dodge(width = 0.9)) +
-  geom_boxplot(outliers = FALSE, position = position_dodge(width = 0.9), width = 0.2) +
-  theme_bw(base_size = 10) +
-  ggtitle('Model prediction error') +
-  theme(plot.title = element_text(hjust = 0.5, size = 10))  +
-  scale_colour_brewer(palette = 'Set2')
 
-ggsave('RegPred_vs_filtering.tiff', dpi = 300, unit = 'mm', width = 170, height = 60)
+View(compare_means(value ~ model,
+              paired = TRUE,
+              data = valid_results,
+              group.by = c('error'),
+              p.adjust.method = "BH"))
 
-# effect on difference in prediction error with null model
-reg_valid_join %>%
-  filter(adj.p.value < 0.05) %>%
-  filter(mae < 4) %>%
-  pivot_longer(cols = c(mae, mape), names_to = 'error', values_to = 'value') %>%
-  dplyr::select(error, value, wilcox_filter, FC_filter, comp, model) %>%
-  pivot_wider(names_from = model, values_from = value) %>%
-  ggplot(aes(y = Null-Model1, x = wilcox_filter, colour = FC_filter)) +
-  facet_wrap(~error, scale = 'free') +
-  geom_violin(position = position_dodge(width = 0.9)) +
-  geom_boxplot(outliers = FALSE, position = position_dodge(width = 0.9), width = 0.2) +
-  theme_bw(base_size = 10) +
-  geom_hline(yintercept = 0, linetype = 'dashed')  +
-  ggtitle('Prediction error difference with null model') +
-  theme(plot.title = element_text(hjust = 0.5, size = 10))  +
-  scale_colour_brewer(palette = 'Set2')
+valid_results_w <- 
+  valid_results %>% 
+  dplyr::select(comp, error, value, model) %>%
+  #filter(model %in% c('Final', 'Null')) %>%
+  filter(error != 'mse') %>%
+  pivot_wider(names_from = error, values_from = value) %>%
+  pivot_wider(names_from = model, values_from = c(mae, mape, me)) %>%
+  mutate(mae_diff_NF = mae_Null - mae_Final,
+         mape_diff_NF = mape_Null - mape_Final)
 
-ggsave('RegPredDiff_vs_filtering.tiff', dpi = 300, unit = 'mm', width = 170, height = 60)
+median(valid_results_w$mae_diff_NF)/median(valid_results_w$mae_Null)
+median(valid_results_w$mape_diff_NF)/median(valid_results_w$mape_Null)
+
+#
+
+valid_results1 <- fin_results_b1 %>%
+  pivot_longer(cols =! comp, names_to = 'error', values_to = 'value') %>%
+  mutate(model = 'Final') %>%
+  rbind(null_results_b1 %>%
+          pivot_longer(cols =! comp, names_to = 'error', values_to = 'value') %>%
+          mutate(model = 'Null'))
+
+write.csv(valid_results1, 'Final_BG_model_errors_B1.csv')
+
+valid_results1 <- read.csv('Final_BG_model_errors_B1.csv')[,-1]
 
 #
 #
 #
 
-b_imp_sum_w <- b_imp_sum_c %>% 
-  pivot_longer(cols = c(BG, S), names_to = 'class', values_to = 'peakArea') %>%
-  pivot_wider(names_from = comp, values_from = peakArea)
+#################################
 
-b_pc <- pca(log(b_imp_sum_w[, -c(1:7)]), scale = TRUE, center = TRUE)
-scores <- as.data.frame(b_pc$variates$X) %>% cbind(b_imp_sum_w[, c(1:7)])
+# visualise effect of asthma based on confidence and effect size
+hist(asthma_pred_b2$p.value, breaks = 30)
+sd(asthma_pred_b2$p.value)
 
-b_pc$prop_expl_var
+#
+fin_results_b1 <- read.csv('Final_BG_model_errors_B1.csv')[,-1]
+fin_results_b1a <- fin_results_b1 %>% filter(model == 'Final') %>%
+  pivot_wider(names_from = error, values_from = value)
 
-scores %>% ggplot(aes(x = PC1, y = PC2, colour = class)) + geom_point()
+asthma_pred_b2b1 <- asthma_pred_b2 %>%
+  left_join(fin_results_b1a) %>%
+  mutate(lab = ifelse(p.value < 0.05 & abs(Estimate) > 0.4, comp, NA))
 
-scores %>% ggplot(aes(x = PC1, y = PC2, colour = as.integer(as.Date(Analysis_date)),
-                      shape = class)) + 
-  geom_point() +
-  scale_colour_gradientn(name = 'Date', 
-                         colours = c('yellow', 'blue'), labels = as.Date) +
-  theme_bw() +
-  ggtitle('CC (Blank) + PQN') +
-  theme(plot.title = element_text(hjust = 0.5)) +
-  xlab('PC1 (19.6%)') +
-  ylab('PC2 (8.6%)')
+colvalquant <- base::seq(from = 0, to = 1, length.out = 5)
+quants <- quantile(asthma_pred_b2b1$mape, colvalquant)
+asthma_pred_b2b1$ptile_var <- ecdf(asthma_pred_b2b1$mape)(asthma_pred_b2b1$mape)
 
-ggsave('B2_PCA_time_BG_S.tiff', unit = 'mm', dpi = 300, width = 120, height = 80)
+#
+
+vol_plot1 <- asthma_pred_b2b1 %>%
+  ggplot(aes(y = -log10(p.value), x = Estimate)) +
+  geom_point(aes(fill = ptile_var), pch = 21, size = 1.3) +
+  geom_vline(xintercept = c(-0.4, 0.4), linetype = 'dashed', colour = 'darkgrey', lwd = 0.3) +
+  geom_hline(yintercept = -log10(0.05), linetype = 'dashed', colour = 'darkgrey', lwd = 0.3) +
+  theme_bw(base_size = 8) +
+  geom_text_repel(aes(label = str_sub(lab, end = 26)), size = 1.8,
+                  point.padding = 0.1, nudge_y = 0.01, lwd = 0.3) +
+  scale_fill_viridis_c(name = 'Validation dataset error (MAPE)',
+                         labels = c(round(quants, 1)),
+                       option = 'plasma') +
+  theme(plot.title = element_text(hjust = 0.5, size = 8, face = 'bold'),
+        legend.key.height = unit(1, 'mm'),
+        legend.position = 'bottom',
+        panel.grid = element_blank(),
+        plot.margin = unit(c(0.1, 0.1, 0, 0.1), 'cm')) +
+  ggtitle('Volcano plot showing effect of asthma diagnosis on breath VOC') +
+  xlim(-0.7, 1) +
+  xlab('Partial regression coefficient') +
+  ylab('-Log10(p.value)') +
+  annotate(geom = 'text', label = 'Asthma', x = -0.6, y = -0.5, size = 3)  +
+  annotate(geom = 'text', label = 'Not Asthma', x = 0.75, y = -0.5, size = 3)
+
 
 dev.new()
-plotLoadings(b_pc, comp = 2, ndisplay = 10)
+vol_plot1
 
-scatp <- function(voc){
-  b_imp_sum_c %>%
-  filter(comp == voc) %>%
-  ggplot(aes(x = log(BG), y = log(S), colour = as.integer(as.Date(Analysis_date)))) +
-  geom_point() +
-  scale_colour_gradientn(name = 'Date', colours = c('yellow', 'blue'), labels = as.Date) +
-  theme_bw() +
-  theme(legend.position = 'none') +
-  ggtitle(voc) +
-    coord_fixed()
-  }
+ggsave('Volcano_plot_univariate_diagnosis.tiff', unit = 'mm', width = 140, height = 90)
 
-scatp('Undecane')
+################################
 
-scats <- lapply(rownames(top_loads), scatp)
-marrangeGrob(scats, nrow = 3, ncol = 3)
-
-hist_voc <- function(voc) {
-  b_imp_sum_c %>%
-  filter(comp == voc) %>%
-  ggplot() +
-  geom_histogram(aes(x = log(S)), bins = 15, alpha = 0.6, fill = 'yellow3')
-  geom_histogram(aes(x = log(BG)), alpha = 0.6, bins = 15, fill = 'blue') +
-  theme_bw() +
-  ggtitle(voc) +
-  theme(plot.title = element_text(hjust = 0.5), legend.position = 'none')
-  }
-
-top_loads <- as.data.frame(b_pc$loadings$X[,2]) %>%
-  rename(load = 'b_pc$loadings$X[, 2]') %>%
-  arrange(desc(abs(load))) %>%
-  slice(1:9)
-
-hists <- lapply(rownames(top_loads) , hist_voc)
-marrangeGrob(hists, nrow = 3, ncol = 3)
-
-hist_voc('Cyclohexane')
-
-timep <- function(voc){
-  b_imp_sum_c %>%
-  filter(comp == voc) %>%
-  group_by(Analysis_date) %>%
-  summarise(BG = median(log(BG)),
-            S = median(log(S))) %>%
-  pivot_longer(cols = c(BG, S), names_to = 'sample', values_to = 'med_peak') %>%
-  ggplot(aes(x = as.Date(Analysis_date), y = med_peak, colour = sample)) +
-  geom_point() +
-  #geom_line(aes(group = sample)) +
-  theme_bw() +
-  xlab('Analysis_date') +
-    ylab('median log(peakArea)') +
-  ggtitle(voc)
-  }
-
-timep('X3_Carene')
-timeps <- lapply(rownames(top_loads) , timep)
-marrangeGrob(timeps, nrow = 3, ncol = 1)
-
-View(as.data.frame(b_pass))
+# Figure 2a
+plot2a <- vol_plot1
 
 #
 #
 #
 
-# visualisation of regression prediction in B2
-subset <- b_imp_sum_c %>%
-  filter(comp == 'Cyclopentane') %>%
-  filter(CoreVisit %in% c('CV1', 'CV2')) %>%
-  drop_na() %>%
-  mutate(logS = log(S), logBG = log(BG)) %>%
-  left_join(infl_obs) %>% # code to exclude influential points based on deletion diagnostics
-  mutate(obs = ifelse(is.na(obs) == TRUE, NA, 'infl')) %>%
-  filter(obs %ni% c('infl'))
+##############################
 
-model <- lmer(logS ~ logBG + Diagnosis + CoreVisit + (1 | RAD_ID),
-              data = subset)
+# APPLYING BG CORRECTION
+## use linear regression coefficients to correct the background signal
+colnames(fin_results_b2_bg)[6:7] <- c('CI_lwr', 'CI_upr')
 
-subset1 <- subset %>% mutate(Diagnosis = 'Asthma', CoreVisit = 'CV1', RAD_ID = 'RAD_001')
+b1_imp_sum_corr <- b1_imp_sum %>%
+  left_join(fin_results_b2_bg %>%
+              mutate(adj.p.value = p.adjust(p.value, method = 'BH')) %>%
+              dplyr::select(comp, Estimate, CI_lwr, CI_upr, adj.p.value)) %>%
+  mutate(logS_adj = log(S) - Estimate*log(BG))
 
-predicted <- subset1 %>% mutate(predicted = predict(model, newdata = subset1, allow.new.levels = TRUE))
+#
 
-dimsulf <- predicted %>% ggplot(aes(x = logBG, y = logS)) + geom_point() +
-  geom_line(aes(x = logBG, y = predicted), colour = 'blue') + theme_bw() +
-  ggtitle('Cyclopentane') +
-  geom_abline(intercept = 0, slope = 1, linetype = 'dashed')
+b2_imp_sum_corr <- b2_imp_sum %>%
+  left_join(fin_results_b2_bg %>%
+              mutate(adj.p.value = p.adjust(p.value, method = 'BH')) %>%
+              dplyr::select(comp, Estimate, CI_lwr, CI_upr, adj.p.value)) %>%
+  mutate(logS_adj = log(S) - Estimate*log(BG))
+
+# exclude VOCs where 95% CI for logBG coefficient includes 1 
+excl <- fin_results_b2_bg %>%
+  filter(CI_upr > 1) 
+
+b1_imp_sum_corr <- b1_imp_sum_corr %>%
+  filter(comp %ni% excl$comp)
+
+b2_imp_sum_corr <- b2_imp_sum_corr %>%
+  filter(comp %ni% excl$comp)
+
+# BG-CORRECTED OUTPUT
+write.csv(b1_imp_sum_corr, 'RADicA_B1_BG_adjusted.csv')
+write.csv(b2_imp_sum_corr, 'RADicA_B2_BG_adjusted.csv')
+
+#
+#
+#
+
+###############################
+
+# FIGURE 1b
+plot_1b <- function(df, voc) {
+    subset <- df %>% filter(comp == voc) %>%
+      mutate(logS = log(S), logBG = log(BG)) %>%
+      left_join(infl_obs %>% dplyr::select(Sample, obs, comp)) %>%
+      filter(is.na(obs) == TRUE)
+    
+    plot <- ggplot(data = subset, 
+                   aes(x = logBG, y = logS)) +
+      geom_point(alpha = 0.5, size = 0.8) + 
+      ggtitle(voc) +
+      theme_bw(base_size = 8) +
+      theme(plot.title = element_text(size = 8),
+            legend.position = 'none',
+            axis.title = element_blank(),
+            panel.grid = element_blank()) +
+      geom_smooth(method = 'lm', se = FALSE, colour = my_pal[[7]]) +
+      scale_y_continuous(labels = scales::number_format(accuracy = 0.1))
+    
+    print(plot)
+  }
+
+ace <- plot_1b(b2_imp_sum, 'Acetophenone') +
+  annotate(geom = 'text', label = 'b = 0.62', x = 10.5, y = 14, size = 2.2, colour = 'purple') +
+  annotate(geom = 'text', label = 'r2 = 0.58', x = 10.5, y = 13.6, size = 2.2, colour = 'purple') +
+  annotate(geom = 'text', label = 'p < 0.01', x = 10.5, y = 13.2, size = 2.2, colour = 'purple')
 
 
-ggsave('Acetophenone_regression_B2.tiff', plot = aceto, dpi = 300, unit = 'mm', width = 80, height = 60)
-ggsave('Cyclopentane_regression_B2.tiff', plot = dimsulf, dpi = 300, unit = 'mm', width = 75, height = 60)
+cyc <- plot_1b(b2_imp_sum, 'Cyclopentane') +
+  annotate(geom = 'text', label = 'b = -0.09', x = 14.05, y = 14.9, size = 2.2, colour = 'purple') +
+  annotate(geom = 'text', label = 'r2 = 0.06', x = 14.05, y = 14.65, size = 2.2, colour = 'purple') +
+  annotate(geom = 'text', label = 'p = 0.26', x = 14.05, y = 14.4, size = 2.2, colour = 'purple')
 
-b2_logbg <- reg_results1_b %>% filter(predictor == 'logBG') %>% mutate(adj.p = p.adjust(p.value, method = 'BH'))
+plot1b <- plot_grid(ace, cyc, ncol = 1) +
+  draw_label(label = 'Background (Log peak area)', size = 8, x = 0.5, y = 0, vjust = 1) +
+  draw_label(label = 'Breath (Log peak area)', x = 0, y = 0.5, angle = 90, size = 8, vjust = 0) +
+  theme(plot.margin = unit(c(0, 0, 0.5, 0.5), "cm"))
+  
+plot(plot1b)
+
+# merge top figure panels
+plot1ab <- plot_grid(plot1a, plot1b, nrow = 1, rel_widths = c(0.73, 0.27), labels = c('a)', 'b)'), label_size = 12)
+dev.new()
+plot(plot1ab)
+
+
+
+#
+#
+#
+
+# Figure 1c
+plot1c <- fin_results_b2_bg %>%
+  dplyr::select(comp, r2, Estimate, p.value) %>%
+  mutate(adj.p.value = p.adjust(p.value, method = 'BH'),
+         sign = ifelse(adj.p.value < 0.05, '< 0.05', '> 0.05')) %>%
+  ggplot(aes(x = r2, y = Estimate, colour = sign)) + 
+  geom_point(size = 0.9, shape = 1, alpha = 0.9) +
+  xlim(0, NA) + ylim(0, NA) +
+  theme_bw(base_size = 8) +
+  scale_colour_manual(name = 'Adj.p value',
+                      values = c('> 0.05' = my_pal[[7]],
+                                 '< 0.05' = 'black')) +
+  ylab('Regression coefficient') +
+  ggtitle('Estimates of background effect \n in mixed-effect models') +
+  theme(plot.title = element_text(hjust = 0.5, face = 'bold', size = 8),
+        legend.position = 'bottom',
+        plot.margin = unit(c(0.6, 0.5, 1, 0.5), 'cm'),
+        panel.grid = element_blank(),
+        legend.direction = 'vertical',
+        legend.title = element_text(size = 6))
+
+plot1c
+
