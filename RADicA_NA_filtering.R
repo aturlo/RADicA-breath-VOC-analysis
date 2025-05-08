@@ -43,14 +43,16 @@ cnas <- function(d, cutoff){ # cutoff = % of NA per VOC
   fnasF <- fnas %>% filter(RatioNA < cutoff)
   p2 <- fnas %>% ggplot(aes(x = RatioNA)) + 
     geom_histogram() +
-    theme_bw(base_size = 12) +
+    theme_bw(base_size = 10) +
     ylab('Sample number') +
     xlab('% Missing') +
     xlim(NA,100) +
     geom_vline(xintercept = cutoff, colour = 'red') +
     annotate('text', x = 28, y = 33, label = nrow(fnasF), colour = 'red',
-             cex = 2)
-  p2
+             cex = 2) +
+    theme(panel.grid = element_blank())
+    
+    p2
   
 }
 
@@ -74,15 +76,16 @@ ggsave('Histogram_NA_B2_class.tiff', NAhists_b1, dpi = 300, unit = 'mm', width =
 # plot frequency of NAs across observations (breath samples only)
 cnas_sample <- function(d, cl, cutoff2) {
   s1 <- cnas(t(d %>% filter(class %in% c(cl)) %>% dplyr::select(!1:5)),
-           cutoff = cutoff2) + ggtitle(cl)
+           cutoff = cutoff2) + ggtitle(cl) +
+    theme(plot.title = element_text(hjust = 0.5, size = 8))
   s1
   }
 
-s1_b1 <- cnas_sample(b1_all, 'S1', 35)
-s1_b2 <- cnas_sample(b2_all, 'S1', 35)
+s1_ab1 <- cnas_sample(b1_all, 'S1', 35)
+s1_ab2 <- cnas_sample(b2_all, 'S1', 35)
 
-s2_b1 <- cnas_sample(b1_all, 'S2', 35)
-s2_b2 <- cnas_sample(b2_all, 'S2', 35)
+s2_ab1 <- cnas_sample(b1_all, 'S2', 35)
+s2_ab2 <- cnas_sample(b2_all, 'S2', 35)
 
 b_b1 <- cnas_sample(b1_all, 'Blank', 35)
 b_b2 <- cnas_sample(b2_all, 'Blank', 35)
@@ -93,16 +96,30 @@ bg_b2 <-cnas_sample(b2_all, 'BG', 35)
 es_b1 <- cnas_sample(b1_all, 'ES', 35)
 es_b2 <- cnas_sample(b2_all, 'ES', 35)
 
-s_b1 <- arrangeGrob(s1_b1, s2_b1, bg_b1, es_b1, b_b1, nrow = 2, ncol = 3)
+s_b1 <- arrangeGrob(s1_ab1, s2_ab1, bg_b1, es_b1, b_b1, nrow = 2, ncol = 3)
 plot(s_b1)
 
-s_b2 <- arrangeGrob(s1_b2, s2_b2, bg_b2, es_b2, b_b2, nrow = 2, ncol = 3)
+s_b2 <- arrangeGrob(s1_ab2, s2_ab2, bg_b2, es_b2, b_b2, nrow = 2, ncol = 3)
 plot(s_b2)
 
 ggsave('Histogram_NA_B1_sample.tiff', s_b1, dpi = 300, unit = 'mm', 
        width = 140, height = 100)
 ggsave('Histogram_NA_B2_sample.tiff', s_b2, dpi = 300, 
        unit = 'mm', width = 140, height = 100)
+
+################################
+
+# Figure S2A
+s2_a <- arrangeGrob(arrangeGrob(s1_ab2, s2_ab2, nrow = 1, top = textGrob('Training dataset',
+                                                                         gp = gpar(fontsize = 10))),
+                               arrangeGrob(s1_ab1, s2_ab1, nrow = 1, top = textGrob('Validation dataset',
+                                                                                    gp = gpar(fontsize = 10))),
+                   nrow = 1,
+                   top = textGrob('Missing value ratio in breath sample replicates',
+                                  gp = gpar(fontsize = 10, fontface = 'bold')))
+plot(s2_a)
+
+################################
 
 #
 

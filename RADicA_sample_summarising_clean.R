@@ -46,8 +46,8 @@ meta <- read.csv('Radica sample filenames aligned with clinical metadata.csv')
 
 ## format datasets
 # specify dataset for analysis
-b_norm <- b2_norm
-dat <- 'B2'
+b_norm <- b1_norm
+dat <- 'B1'
 
 #
 #
@@ -117,12 +117,6 @@ gauss1_icc <- bind_rows(lapply(unique(b_imp_c2$comp), function(voc){
 plot(gauss1_icc$icc_agreement, gauss1_icc$icc_consistency)
 plot(gauss1_icc$icc_consistency, gauss1_icc$icc_cvgen_consistency)
 
-# plot distribution of ICC for all VOCs in the datset 
-tiff(paste('Histogram_ICC_' , dat, '.tiff', sep = ''), res = 300, unit = 'mm', width = 110, height = 90)
-hist(gauss1_icc$icc_agreement, xlab = 'ICC (agreement)', 
-     main = 'ICC for breath sample replicates', ylim = c(0,60))
-abline(v = 0.5, col = 'red')
-dev.off()
 
 #
 #
@@ -142,6 +136,20 @@ write.csv(b2_icc, 'ICC_breath_VOC_B2.csv')
 
 #
 #
+#
+
+# plot distribution of ICC for all VOCs in the datset 
+tiff(paste('Histogram_ICC_B1' , dat, '.tiff', sep = ''), res = 300, unit = 'mm', width = 110, height = 90)
+hist(b1_icc$icc_agreement, xlab = 'ICC (agreement)', 
+     main = 'Validation dataset', ylim = c(0,60), cex.main = 1)
+abline(v = 0.5, col = 'red')
+dev.off()
+
+#
+
+hist(b2_icc$icc_agreement, xlab = 'ICC (agreement)', 
+     main = 'Training dataset', ylim = c(0,60), cex.main = 1)
+abline(v = 0.5, col = 'red')
 
 #################################
 
@@ -165,7 +173,7 @@ tiff('ICC_compare_B1_B2.tiff', res = 300, units = 'mm', width = 140, height = 12
 plot(
   icc$icc_agreement.x, icc$icc_agreement.y, 
   main = 'ICC agreement in Volatile Organic Compound breath replicates',
-  xlab = 'Dataset 2', ylab = 'Dataset 1', xlim = c(0,1), ylim = c(0,1),
+  xlab = 'Trainig dataset', ylab = 'Validation dataset', xlim = c(0,1), ylim = c(0,1),
   cex.main = 1) + 
   abline(0,1) + abline(v = 0.5, col = 'blue', lty = 2) + 
   abline(h = 0.5, col = 'blue', lty = 2) +
@@ -202,4 +210,42 @@ write.csv(b2_imp_c1, 'RADicA_B2_NAfiltered_imputed_CC2_PQN_summarised.csv')
 #
 #
 
+###############################
 
+# Figure S6
+tiff('figS6.tiff', res = 300, unit = 'mm', width = 145, height = 100)
+
+#
+pdf('FigureS6.pdf', width = 5.7, height = 3.9)
+
+#
+s6 <- layout(matrix(c(1, 2, 3, 3), ncol = 2), widths = c(1,2))
+
+hist(b2_icc$icc_agreement, xlab = 'ICC (agreement)', 
+     main = 'Training dataset', ylim = c(0,60), cex.main = 1)
+abline(v = 0.5, col = 'red')
+text(xpd = NA, 'a)', x = 0, y = 135, pos = 2, offset = 2.5, cex = 1.5, font = 2)
+
+hist(b1_icc$icc_agreement, xlab = 'ICC (agreement)', 
+     main = 'Validation dataset', cex.main = 1)
+abline(v = 0.5, col = 'red')
+
+plot(
+  icc$icc_agreement.x, icc$icc_agreement.y, 
+  main = 'ICC agreement in VOC breath datasets',
+  xlab = 'Trainig dataset', ylab = 'Validation dataset', xlim = c(0,1), ylim = c(0,1),
+  cex.main = 1) + 
+  abline(0,1) + abline(v = 0.5, col = 'blue', lty = 2) + 
+  abline(h = 0.5, col = 'blue', lty = 2) +
+  text(y = 0.55, x = 0.99, label = length(both_pass), col = 'blue') +
+  text(y = 0.55, x = 0.05, label = length(b1_pass), col = 'blue') +
+  text(y = 0.01, x = 0.99, label = length(b2_pass), col = 'blue') +
+  text(y = 0.01, x = 0.05, label = length(none_pass), col = 'blue')
+text(xpd = NA, 'b)', x = 0, y = 1.26, pos = 2, offset = 3, cex = 1.5, font = 2)
+dev.off()
+
+################################
+
+#
+#
+#

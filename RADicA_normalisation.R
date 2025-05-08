@@ -13,6 +13,9 @@ library(tibble)
 library(mixOmics)
 library(pcaPP)
 library(stringr)
+library(grafify)
+library(grid)
+library(gridExtra)
 
 
 ## load data
@@ -66,8 +69,8 @@ b2_imp <- b_imp
 
 # NORMALISATION OF IMPUTED DATA
 # specify dataset for analysis
-b_imp <- b1_imp
-dat <- 'B1'
+b_imp <- b2_imp
+dat <- 'B2'
 
 b_imp_L <- b_imp %>% pivot_longer(cols = c(6:ncol(b_imp)), names_to = 'comp', values_to = 'peakArea')
 
@@ -231,7 +234,7 @@ b_pqn <- pqn(b_imp, b_imp) # change to b2_imp for B1 - use the same reference fo
 b2_cc2 <- b_cc2
 
 b2_cc2_pqn <- pqn(b2_cc2, b2_cc2) # change to b2_cc2 for B1 - use the same reference for both
-b1_cc2_pqn <- pqn(b2_cc2, b1_cc2)
+b1_cc2_pqn <- pqn(b2_cc2, b_cc2)
 
 plotIndiv(pca(log(b2_cc2_pqn[,-c(1:4)]), scale = TRUE), pch = 1)
 
@@ -269,44 +272,76 @@ disp_IS <- disp(b_IS, 'IS')
 disp_cc <- disp(b_cc, 'CC')
 disp_cc2 <- disp(b_cc2, 'CC2')
 disp_pqn <- disp(b_pqn, 'PQN')
-disp_cc2_pqn <- disp(b_cc2_pqn, 'CC2 PQN')
+disp_cc2_pqn <- disp(b2_cc2_pqn, 'CC2 PQN')
 
 #
 
-disp_conc <- rbind(disp_raw, disp_IS, disp_cc,
+disp_conc <- rbind(disp_raw, disp_IS, #disp_cc,
                    disp_cc2, disp_pqn, disp_cc2_pqn)
 
 # visualise distribution of relative dispersion values following different normalisation methods
+pals <- grafify::graf_palettes
+my_pal = pals$fishy
+
 plot_disp <- function(m) { # m = dispersion measure: RSD, rIQR, rMAD
   disp_conc %>% 
   filter(class %ni% c('Blank')) %>%
-  ggplot(aes(x = .data[[m]], y = factor(norm, levels = c('CC2 PQN', 'CC2','CC', 'PQN', 'IS', 'Raw')), 
+  ggplot(aes(x = round(.data[[m]], 1), y = factor(norm, levels = c('CC2 PQN', 'CC2','CC', 'PQN', 'IS', 'Raw')), 
              fill = norm)) +
-  geom_boxplot(outliers = FALSE) +
+  geom_boxplot(outliers = FALSE, lwd = 0.3) +
   facet_wrap(~ class, scale = 'free', 
              ncol = 1) +
-  theme_bw() +
+  theme_bw(base_size = 10) +
   ylab('Normalisation method') + xlab(m) +
-  theme(plot.title = element_text(hjust = 0.4, size = 11))}
+  theme(plot.title = element_text(hjust = 0.4, size = 8),
+        strip.background = element_blank(),
+        panel.spacing = unit(0, 'mm'),
+        axis.text = element_text(size = 6),
+        panel.grid = element_blank()) +
+    scale_fill_grafify(palette = 'fishy')}
 
 
-rsd_p <- plot_disp('rsd') + theme(legend.position = 'none',
-                                  plot.title = element_text(size = 9)) + 
+rsd_p <- plot_disp('rsd') + theme(legend.position = 'none') #+ 
   ggtitle('Relative standard deviation')
 
-rmad_p <- plot_disp('rMAD') + theme(legend.position = 'none',
-                                    plot.title = element_text(size = 9)) + 
+rmad_p <- plot_disp('rMAD') + theme(legend.position = 'none') #+ 
                                       ggtitle('Relative median absolute deviation')
 
-riqr_p <- plot_disp('rIQR') + theme(plot.title = element_text(size = 9)) +
+riqr_p <- plot_disp('rIQR') + theme(legend.position = 'none',
+                                    axis.title.y = element_blank()) #+
   ggtitle('Relative interquartile range')
 
-disp_plots <- arrangeGrob(rsd_p, rmad_p, riqr_p, widths = c(0.29, 0.29, 0.42))
+disp_plots <- arrangeGrob(rsd_p, rmad_p, riqr_p, nrow = 1, widths = c(0.29, 0.29, 0.42))
 
 dev.new()
 plot(disp_plots)
 
 ggsave(paste('Boxplots_normalisation_', dat, '.tiff', sep =''), disp_plots, dpi = 300, units = 'mm', width = 240, height = 170)
+
+#
+#
+#
+
+###############################
+
+# Figure S5B
+s5b_b2 <- arrangeGrob(rmad_p, riqr_p, nrow = 1, top = textGrob('Training dataset', vjust = 1.2,
+                                                               gp = gpar(fontsize = 10)),
+                      widths = c(0.53, 0.47))
+s5b_b1 <- arrangeGrob(rmad_p, riqr_p, nrow = 1, top = textGrob('Validation dataset', vjust = 1.2,
+                                                               gp = gpar(fontsize = 10)),
+                      widths = c(0.53, 0.47))
+
+s5b_f <- ggplot() + 
+  geom_rect(data = disp_conc, mapping = aes(xmin = 0, xmax = 1, ymin = 0, ymax = 1), 
+            fill = 'white', alpha = 1) + theme(axis.text = element_blank(),
+                                               axis.ticks = element_blank())
+  
+
+s5b <- arrangeGrob(s5b_b2, s5b_f, s5b_b1, nrow = 1, widths = c(0.475,  0.05, 0.475),
+                   top = textGrob('Measures of dispersion in VOC datasets',
+                                  gp = gpar(fontsize = 10, fontface = 'bold')))
+plot(s5b)
 
 
 #
@@ -314,18 +349,36 @@ ggsave(paste('Boxplots_normalisation_', dat, '.tiff', sep =''), disp_plots, dpi 
 #
 
 # PRINCIPAL COMPONENT ANALYSIS
+pals <- grafify::graf_palettes
+my_pal = pals$fishy
+
 PCA_plot <- function(x, y) { # x is a dataframe of normalised values, y is the name of normalisation method
   #rownames(x) <- 1:nrow(x)
-  plotIndiv(mixOmics::pca(log(x[,-c(1:4)]), scale = TRUE, center = TRUE, ncomp = 3),
+  plot <- plotIndiv(mixOmics::pca(log(x[,-c(1:4)]), scale = TRUE, center = TRUE, ncomp = 3),
             pch = 1,
-            cex = 1.5,
+            cex = 0.4,
             group = x$class,
             title = y,
             #legend = TRUE,
             legend.title = 'class',
             comp = c(1,2),
-            
-            )
+            size.title = 8,
+            size.xlabel = 8,
+            size.ylabel = 8,
+            size.legend.title = 6,
+            size.legend = 6,
+            size.axis = 6)
+  
+  plot_fin <- plot$graph + theme(strip.background = element_blank()) + 
+    theme(strip.background = element_blank(),
+          plot.title = element_text(face = 'plain'),
+          plot.margin = unit(c(0, 0.1, 0, 0.1), 'cm'),
+          panel.grid = element_blank()) + 
+    scale_colour_manual(values = c('ES' = my_pal[[6]],
+                                   'BG' = my_pal[[7]],
+                                   'S1' = my_pal[[8]],
+                                   'S2' = my_pal[[9]]))
+  
   } 
 
 
@@ -348,21 +401,69 @@ pqn_class <- PCA_plot(b_pqn %>%
                        'PQN')
 
 
-cc_pqn_class <- PCA_plot(b_cc2_pqn %>% 
+cc_pqn_class <- PCA_plot(b2_cc2_pqn %>% 
                      filter(class %ni% c('Blank')), 
                    'CC2 PQN')
 
 
 
 # figure displaying class annotation
-pca <- arrangeGrob(raw_class$graph, is_class$graph, pqn_class$graph,
-                   cc_class$graph, cc2_class$graph, cc_pqn_class$graph,
+pca <- arrangeGrob(raw_class, is_class, pqn_class, cc_class, 
+                   cc2_class, cc_pqn_class,
             ncol = 3, nrow = 2)
 
 dev.new()
 plot(pca)
 
 ggsave(paste('PCA_normalisation_comp_', dat, '.tiff', sep = ''), pca, dpi = 300, unit = 'mm', width = 250, height = 150)
+
+#
+#
+#
+
+################################
+
+# Figure S5C
+leg5c <- get_legend(cc_pqn_class)
+
+s5c_b2 <- arrangeGrob(raw_class, is_class, pqn_class, 
+                      cc2_class, cc_pqn_class, leg5c,
+                      ncol = 2, nrow = 3,
+                      top = textGrob('Training dataset', vjust = 1,
+                                     gp = gpar(fontsize = 10)))
+
+plot(s5c_b2)
+
+s5c_b1 <- arrangeGrob(raw_class, is_class, pqn_class, 
+                      cc2_class, cc_pqn_class, leg5c,
+                      ncol = 2, nrow = 3,
+                      top = textGrob('Validation dataset', vjust = 1,
+                                     gp = gpar(fontsize = 10)))
+
+plot(s5c_b1)
+
+s5c <- arrangeGrob(s5c_b2, s5b_f, s5c_b1, nrow = 1, widths = c(0.475, 0.05, 0.475),
+                   top = textGrob('PCA score plots of VOC datasets',
+                                  gp = gpar(fontsize = 10, fontface = 'bold')))
+plot(s5c)
+
+
+#
+
+###############################
+
+# Assemble FigureS5
+
+s5 <- plot_grid(s5c, s5b, nrow = 2, rel_heights = c(0.55, 0.45),
+                labels = c('a)', 'b)'), label_size = 12)
+plot(s5)
+
+ggsave('figs5.tiff', s5, unit = 'mm', dpi = 300, width = 157, height = 220)
+
+pdf('FigureS6.pdf', width = 6.18, height = 8.66)
+plot(s5)
+dev.off()
+
 
 #
 #

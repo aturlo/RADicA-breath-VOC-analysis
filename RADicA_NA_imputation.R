@@ -17,6 +17,10 @@ library(stringr)
 library(gridExtra)
 library(lme4)
 library(mixOmics)
+library(cowplot)
+library(grafify)
+
+#
 
 ## load data
 # load filtered study data with missing values
@@ -38,8 +42,8 @@ meta <- read.csv('Radica sample filenames aligned with clinical metadata.csv')
 
 ## EXPLORATION OF MISSING DATA TYPES
 # specify dataset for analysis
-b_all_f <- b2_all_f
-dat <- 'B2'
+b_all_f <- b1_all_f
+dat <- 'B1'
 
 #
 
@@ -65,6 +69,40 @@ medVSna <- sumint %>% group_by(class) %>%
 marrangeGrob(medVSna$plots, nrow = 2, ncol = 3)
 
 dev.off()
+
+################################
+
+# Figure S2B
+
+medVSna_b1 <- sumint %>% filter(class %in% c('S1', 'S2')) %>%
+  ggplot(aes(x = med, y = nonas)) +
+  geom_point(alpha = 0.6, size = 0.8) + theme_bw(base_size = 10) +
+  ylab('% of missing values') + xlab('Median peak intensity') +
+  facet_wrap(~ class) +
+  theme(strip.background = element_blank(),
+        plot.title = element_text(hjust = 0.5, size = 10),
+        panel.grid = element_blank()) +
+  ggtitle('Validation dataset')
+
+
+medVSna_b2 <- sumint %>% filter(class %in% c('S1', 'S2')) %>%
+  ggplot(aes(x = med, y = nonas)) +
+  geom_point(alpha = 0.6, size = 0.8) + theme_bw(base_size = 10) +
+  ylab('% of missing values') + xlab('Median peak intensity') +
+  facet_wrap(~ class) +
+  theme(strip.background = element_blank(),
+        plot.title = element_text(hjust = 0.5, size = 10),
+        panel.grid = element_blank()) +
+  ggtitle('Training dataset')
+
+s2_b <- arrangeGrob(medVSna_b2, medVSna_b1, nrow = 1, ncol = 2, 
+                    top = textGrob('Missing value ratio in breath VOCs',
+                                   gp = gpar(fontsize = 10, fontface = 'bold')))
+plot(s2_b)
+
+##################################
+
+#
 
 # number of complete variables across groups
 sumint %>% group_by(class) %>% summarise(complete_var = sum(nonas == 0)/n_distinct(comp))
@@ -124,6 +162,56 @@ pdf(paste('Missing_pattern_sample_', dat, '.pdf'))
 marrangeGrob(violin_plots$plots, nrow = 4, ncol = 4)
 dev.off()
 
+#################################
+
+# Figure S2C
+pals <- grafify::graf_palettes
+my_pal = pals$fishy
+
+s3_b1 <- s_tech %>% filter(techNA != 'Missing2') %>%
+  pivot_longer(cols = c(S1, S2) , names_to = 'Replicate', values_to = 'peakArea') %>%
+  mutate(Sample = paste(RAD_ID, CoreVisit, sep = '_')) %>%
+  filter(Sample %in% c('RAD002_CV1', 'RAD002_CV2')) %>%
+  ggplot(aes(x = techNA, y = log(peakArea), colour = Replicate)) +
+  geom_violin(aes(colour = Replicate), position = position_dodge(0.9)) + 
+  geom_boxplot(aes(colour = Replicate), position = position_dodge(0.9), width = 0.1) + 
+  theme_bw(base_size = 10) +
+  theme(legend.position = 'none',
+        strip.background = element_blank(),
+        axis.title.x = element_blank(),
+        plot.title = element_text(hjust = 0.5, size = 10),
+        panel.grid = element_blank()) +
+  facet_wrap(~ Sample) +
+  scale_color_manual(values = c('S1' = my_pal[[4]], 'S2' = my_pal[[5]])) +
+  ggtitle('Validation dataset')
+
+s3_b1 
+
+s3_b2 <- s_tech %>% filter(techNA != 'Missing2') %>%
+  pivot_longer(cols = c(S1, S2) , names_to = 'Replicate', values_to = 'peakArea') %>%
+  mutate(Sample = paste(RAD_ID, CoreVisit, sep = '_')) %>%
+  filter(Sample %in% c('RAD110_CV1', 'RAD110_CV2')) %>%
+  ggplot(aes(x = techNA, y = log(peakArea), colour = Replicate)) +
+  geom_violin(aes(colour = Replicate), position = position_dodge(0.9)) + 
+  geom_boxplot(aes(colour = Replicate), position = position_dodge(0.9), width = 0.1) + 
+  theme_bw(base_size = 10) +
+  theme(legend.position = 'none',
+        strip.background = element_blank(),
+        axis.title.x = element_blank(),
+        plot.title = element_text(hjust = 0.5, size = 10),
+        panel.grid = element_blank()) +
+  facet_wrap(~ Sample) +
+  scale_color_manual(values = c('S1' = my_pal[[4]], 'S2' = my_pal[[5]])) +
+  ggtitle('Training dataset')
+
+s3_b2 
+
+s3_c <- arrangeGrob(s3_b2, s3_b1, nrow = 1, top = textGrob('VOC abundance in breath sample replicates',
+                                                           gp = gpar(fontsize = 10, fontface = 'bold')))
+plot(s3_c)
+
+##################################
+
 #
 #
 #
@@ -131,8 +219,8 @@ dev.off()
 ## EFFECT OF EXPERIMENTAL FACTORS ON MISSINGNESS
 # heatmap of NAs according to experimental condition and sample type
 # specify dataset 
-data <- b2_all_f
-dat <- 'B2'
+data <- b1_all_f
+dat <- 'B1'
 
 #
 
@@ -143,8 +231,10 @@ rownames(data_heat) <- data$Sample
 
 data$class <- factor(data$class, levels = c('ES', 'Blank', 'BG', 'S1', 'S2'))
 
-cols1 <- (hue_pal()(n_distinct(data$class))) 
-cols2 <- (hue_pal()(n_distinct(data$Batch))) 
+
+
+cols1 <- my_pal[1:(n_distinct(data$class))]
+cols2 <- my_pal[(10-(n_distinct(data$Batch))):9] 
 names(cols1) <- c('ES', 'Blank', 'BG', 'S1', 'S2')
 names(cols2) <- unique(data$Batch)
 annotCol <- list(class = cols1,
@@ -161,30 +251,40 @@ heatmap <- pheatmap(as.matrix(t(data_heat)),
                     show_colnames = FALSE, cluster_cols =  T, 
                     show_rownames = FALSE, cluster_rows = FALSE,
                     fontsize = 10, main = 'Missing values across samples',
+                    #'Training dataset', # title for supplementary figure
                     color = c('Tomato1', 'Black'),
                     treehight_col = 100,
                     annotation_colors = annotCol,
-                    treeheight_col = 70) # use for analysis date mapping
+                    treeheight_col = 70,
+                    legend = FALSE) # use for analysis date mapping
 heatmap
 dev.off()
 
 #
 
 # in breath samples only, including diagnosis and core visit
-b_s <- data %>% filter(class %in% c('S1','S2')) %>% dplyr::select(!1:5)
+b_s <- data %>% filter(class %in% c('S1','S2')) %>% 
+  dplyr::select(!1:5)
+
 data_heat1 <- b_s
 data_heat1[is.na(data_heat1)] <- 0
 data_heat1[data_heat1 > 0] <- 1
-rownames(data_heat) <- b_s$Sample
+rownames(data_heat1) <- rownames(b_s)
 
 b_all_an <- data %>% filter(class %in% c('S1','S2')) %>%
   left_join(meta %>% dplyr::select(Sample_ID, Diagnosis, CoreVisit),
-            by = c('Sample' = 'Sample_ID')) 
+            by = c('Sample' = 'Sample_ID')) %>%
+  filter(CoreVisit %in% c('CV1', 'CV2'))
+
+data_heat1 <- data_heat1 %>% filter(rownames(.) %in% b_all_an$Sample)
+
+b_all_an$Batch <- as.factor(b_all_an$Batch)
+
 rownames(b_all_an) <- b_all_an$Sample 
 
-cols3 <- (hue_pal()(n_distinct(b_all_an$Batch)))
-cols4 <- (hue_pal()(n_distinct(b_all_an$Diagnosis)))
-cols5 <- (hue_pal()(n_distinct(b_all_an$CoreVisit)))
+cols3 <- my_pal[1:(n_distinct(b_all_an$Batch))]
+cols4 <- my_pal[5:(4 + (n_distinct(b_all_an$Diagnosis)))]
+cols5 <- my_pal[7:(6 + (n_distinct(b_all_an$CoreVisit)))]
 names(cols3) <- na.omit(unique(b_all_an$Batch))
 names(cols4) <- na.omit(unique(b_all_an$Diagnosis))
 names(cols5) <- unique(b_all_an$CoreVisit)
@@ -198,12 +298,30 @@ heatmap1 <- pheatmap(as.matrix(t(data_heat1)),
                      annotation_col = b_all_an %>% dplyr::select(Batch, Diagnosis, CoreVisit), 
                      show_colnames = FALSE, cluster_cols =  T, 
                      show_rownames = FALSE, cluster_rows = FALSE,
-                     fontsize = 10, main = 'Missing values across breath samples',
+                     fontsize = 10, main = #'Missing values across breath samples',
+                       'Validation dataset',
                      color = c('Tomato1', 'Black'),
                      annotation_colors = annotCol1,
-                     treeheight_col = 70)
+                     treeheight_col = 70,
+                     legend = FALSE)
 
 heatmap1
+dev.off()
+
+##################################
+
+# Figure S3
+
+s3_a <- heatmap1
+s3_b <- heatmap1
+
+s3 <- plot_grid(s3_a$gtable, s3_b$gtable, nrow = 2)
+plot(s3)
+
+ggsave('figS3.tiff', dpi = 300, unit = 'mm', width = 120, height = 210)
+
+pdf('FigureS3.pdf', width = 4.72, height = 7.87)
+plot(s3)
 dev.off()
 
 #
@@ -288,8 +406,8 @@ write.csv(b2_imp, 'RADicA_B2_NAfiltered_imputed.csv')
 
 # EFFECT OF IMPUTATION ON DATA
 # specify dataset for analysis
-b_imp <- b2_imp %>% as.data.frame()
-b_all_f <- b2_all_f  %>% filter(Sample %ni% '200131_RaDICA_Batch372_tracker_497813_1')
+b_imp <- b1_imp %>% as.data.frame()
+b_all_f <- b1_all_f  %>% filter(Sample %ni% '200131_RaDICA_Batch372_tracker_497813_1')
 dat <- 'B2'
 
 # change data format to long
@@ -309,14 +427,71 @@ dens_plot <-
   geom_density(aes(x = log(peakArea), colour = 'Imputed dataset')) +
   geom_density(data = b_all_fL %>% drop_na(),
                  aes(x = log(peakArea), colour = 'Observed dataset')) +
-  theme_bw() +
+  theme_bw(base_size = 10) +
   xlab('log( Peak area)') +
   facet_wrap(~ class, scale = 'free') +
-  xlim(0, NA)
+  xlim(0, NA) +
+  theme(panel.grid = element_blank(),
+        strip.background = element_blank())
 
 dens_plot
 
 ggsave(paste('Density_imputed_', dat, '.tiff', sep = ''), dens_plot, dpi = 300, units = 'mm', width = 240, height = 120)
+
+#
+
+#################################
+
+# Figure S4A
+
+s4a_b2 <- b_imp_L %>% 
+  filter(class %in% c('S1', 'S2')) %>%
+  ggplot() + 
+  geom_density(aes(x = log(peakArea), colour = 'Imputed dataset'), lwd = 0.3) +
+  geom_density(data = b_all_fL %>% drop_na() %>% 
+                 filter(class %in% c('S1', 'S2')),
+               aes(x = log(peakArea), colour = 'Observed dataset'), lwd = 0.3) +
+  theme_bw(base_size = 10) +
+  xlab('log( Peak area)') +
+  facet_wrap(~ class, scale = 'free') +
+  xlim(0, NA) +
+  theme(panel.grid = element_blank(),
+        strip.background = element_blank(),
+        plot.title = element_text(hjust = 0.5, size = 10),
+        legend.position = 'none',
+        axis.title = element_text(size = 8)) +
+  ggtitle('Training dataset')
+
+
+s4a_b2
+
+s4a_b1 <- b_imp_L %>% 
+  filter(class %in% c('S1', 'S2')) %>%
+  ggplot() + 
+  geom_density(aes(x = log(peakArea), colour = 'Imputed dataset'), lwd = 0.3) +
+  geom_density(data = b_all_fL %>% drop_na() %>%
+                 filter(class %in% c('S1', 'S2')),
+               aes(x = log(peakArea), colour = 'Observed dataset'), lwd = 0.3) +
+  theme_bw(base_size = 10) +
+  xlab('log( Peak area)') +
+  facet_wrap(~ class, scale = 'free') +
+  xlim(0, NA) +
+  theme(panel.grid = element_blank(),
+        strip.background = element_blank(),
+        plot.title = element_text(hjust = 0.5, size = 10),
+        axis.title = element_text(size = 8)) +
+  ggtitle('Validation dataset')
+
+s4a_b1
+
+s4a <- arrangeGrob(s4a_b2 + theme(plot.margin = unit(c(0.1, 0.1, 0.1, 0.1), 'cm')), 
+                   s4a_b1 + theme(plot.margin = unit(c(0.1, 0.1, 0.1, 0.1), 'cm')), 
+                   nrow = 1, widths = c(0.37, 0.63),
+                   top = textGrob('Breath sample VOC peak area distributions',
+                   gp = gpar(fontsize = 10, fontface = 'bold')))
+plot(s4a)
+
+##################################
 
 #
 
@@ -392,11 +567,19 @@ plot_pca <- function(x, y, z){
   pca <- mixOmics::pca(log(x), scale = TRUE, center = TRUE)
   plot_pca <- plotIndiv(pca,
                         pch = 1,
-                        cex = 1.5,
+                        cex = 0.6,
                         group = y$Batch,
                         title = z,
-                        size.title = 10)
-  
+                        size.title = 8,
+                        size.xlabel = 8,
+                        size.ylabel = 8,
+                        size.legend.title = 6,
+                        size.axis = 6)
+  plot_pca <- plot_pca$graph + theme(strip.background = element_blank(),
+                                     plot.title = element_text(face = 'plain'),
+                                     plot.margin = unit(c(0.1, 0.1, 0.1, 0.1), 'cm')) + 
+    scale_colour_grafify(palette = 'fishy', name = 'Batch')
+    
 }
 
 #
@@ -425,6 +608,90 @@ plot(pc_plots)
 
 ggsave(paste('PCA_complete_vs_imputed_' , dat, '.tiff', sep = ''),
        pc_plots, dpi = 300, unit = 'mm', width = 310, height = 120)
+
+#################################
+
+# Figure S4B
+
+s4b_b2 <- arrangeGrob(pc_s1_c, 
+                      pc_s2_c, 
+                      pc_s1_i, 
+                      pc_s2_i, 
+                      nrow = 2,
+                      top = textGrob('Training dataset',
+                                     gp = gpar(fontsize = 10)))
+plot(s4b_b2)
+
+s4b_b1 <- arrangeGrob(pc_s1_c, 
+                      pc_s2_c, 
+                      pc_s1_i, 
+                      pc_s2_i, 
+                      nrow = 2,
+                      top = textGrob('Validation dataset',
+                                     gp = gpar(fontsize = 10)))
+plot(s4b_b1)
+
+#
+
+get_legend_35 <- function(plot) {
+  # return all legend candidates
+  legends <- get_plot_component(plot, "guide-box", return_all = TRUE)
+  # find non-zero legends
+  nonzero <- vapply(legends, \(x) !inherits(x, "zeroGrob"), TRUE)
+  idx <- which(nonzero)
+  # return first non-zero legend if exists, and otherwise first element (which will be a zeroGrob) 
+  if (length(idx) > 0) {
+    return(legends[[idx[1]]])
+  } else {
+    return(legends[[1]])
+  }
+}
+
+legb2 <- pc_s1_c + theme(legend.position = 'bottom') +
+  scale_colour_grafify(palette = 'fishy', name = 'Batch \n (training dataset)') +
+  theme(legend.title = element_text(size = 8))
+legb2a <- get_legend_35(legb2)
+plot(legb2a)
+
+
+legb1 <- pc_s1_c + theme(legend.position = 'bottom') +
+  scale_colour_grafify(palette = 'fishy', name = 'Batch \n (validation dataset)') +
+  theme(legend.title = element_text(size = 8))
+legb1a <- get_legend_35(legb1)
+plot(legb1a)
+
+legs <- arrangeGrob(legb2a, legb1a, nrow = 1)
+plot(legs)
+
+#
+
+s4b <- arrangeGrob(s4b_b2, s4b_b1, nrow = 1, widths = c(0.44, 0.44),
+                   top = textGrob('PCA score plots of breath sample VOC profiles',
+                                  gp = gpar(fontface = 'bold', fontsize = 10)))
+plot(s4b)
+
+
+
+#
+
+
+
+################################
+
+# Assemble figure S4
+s4 <- plot_grid(s4a, s4b, legs, nrow = 3, rel_heights = c(0.3, 0.65, 0.05),
+                labels = c('a)', 'b)'))
+
+dev.new()
+plot(s4)
+
+ggsave('figS4.tiff', unit = 'mm', dpi = 300, width = 157, height = 145)
+
+pdf('FigureS4.pdf', width = 6.18, height = 5.7)
+plot(s4)
+dev.off()
+
+################################
 
 #
 #
@@ -504,6 +771,24 @@ imp_test_df <- imp_test %>% t() %>% as.data.frame() %>%
 
 # edit file name accordingly
 write.csv(imp_test_df, 'Wilcox_paired_breath_imputedVSobserved_B1.csv')
+
+#
+#
+#
+
+#################################
+
+# Figure S2 assembly
+s2 <- plot_grid(s2_a, s2_b, s3_c, nrow = 3, labels = c('a)', 'b)', 'c)'),
+                label_size = 12,
+                rel_heights = c(0.325, 0.35, 0.325))
+plot(s2)
+
+ggsave('figS2.tiff', s2, unit = 'mm', dpi = 300, width = 150, height = 150)
+
+pdf('FigureS2.pdf', width = 6.18, height = 6.18)
+plot(s2)
+dev.off()
 
 #
 #

@@ -88,7 +88,7 @@ plot_pca <- function(pca_b, data, Title){
   p <- plotIndiv(pca_b,
             #ind.names = data$RAD_ID,
             group = data$Diagnosis,
-            legend = FALSE, 
+            legend = TRUE, 
             comp = c(1,2),
             pch = as.factor(data$CoreVisit),
             size.title = 8,
@@ -243,6 +243,7 @@ b2_corr_out <- b2_corr_w %>% filter(Sample %ni% outliers)
 write.csv(b1_corr_out, 'RADicA_BG_adjusted_B1_outl_removed.csv')
 write.csv(b2_corr_out, 'RADicA_BG_adjusted_B2_outl_removed.csv')
 
+
 #
 #
 #
@@ -253,12 +254,12 @@ pca_b2_out <- pca(b2_corr_out[,-c(1:4)], scale = TRUE, center = TRUE)
 
 #
 
-b1_out_plot <- plot_pca(pca_b1_out, b1_corr_out, 'Dataset 1 (w/o outliers)') + # change plot name depending on input
+b1_out_plot <- plot_pca(pca_b1_out, b1_corr_out, 'Validation dataset') + # change plot name depending on input
   theme(text = element_text(size = 8),
         legend.key.width = unit(2, 'mm'),
         legend.key.height = unit(5, 'mm')) 
 
-b2_out_plot <- plot_pca(pca_b2_out, b2_corr_out, 'Dataset 2 (w/o outliers)') + # change plot name depending on input
+b2_out_plot <- plot_pca(pca_b2_out, b2_corr_out, 'Training dataset') + # change plot name depending on input
   theme(text = element_text(size = 8),
         legend.key.width = unit(2, 'mm'),
         legend.key.height = unit(5, 'mm')) 
@@ -267,6 +268,26 @@ b2_out_plot <- plot_pca(pca_b2_out, b2_corr_out, 'Dataset 2 (w/o outliers)') + #
 
 b1_out_plot
 b2_out_plot
+
+#
+
+########################
+
+# Figure S7
+s7 <- arrangeGrob(b2_out_plot, b1_out_plot, nrow = 1,
+                  widths = c(0.42, 0.58),
+                  top = textGrob('PCA score plots of breath VOC data following outlier removal',
+                                 gp = gpar(fontsize = 10, fontface = 'bold')))
+
+plot(s7)
+
+ggsave('figS7.tiff',s7, unit = 'mm', dpi = 300, width = 157, height = 75)
+
+pdf('FigureS7.pdf', width = 6.18, height = 2.95)
+plot(s7)
+dev.off()
+
+#########################
 
 #
 
