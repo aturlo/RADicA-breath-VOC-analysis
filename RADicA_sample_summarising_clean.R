@@ -2,12 +2,11 @@
 
 # author: Aggie Turlo
 # project: RADicA
-# date: 27/01/2025
+# date: 30/06/2025
 
 #####################
 
-library(dplyr)
-library(tidyr)
+library(tidyverse)
 library(ggplot2)
 library(tibble)
 library(gridExtra)
@@ -22,8 +21,8 @@ library(insight)
 
 ## load data
 # load imputed normalised study data
-b1_norm <- read.csv('RADicA_B1_NAfiltered_imputed_CC2_PQN.csv')[,-1]
-b2_norm <- read.csv('RADicA_B2_NAfiltered_imputed_CC2_PQN.csv')[,-1]
+b1_norm <- read.csv('RADicA_B1_NAfiltered_imputed_CC2_PQN.csv', check.names = FALSE)[,-1]
+b2_norm <- read.csv('RADicA_B2_NAfiltered_imputed_CC2_PQN.csv', check.names = FALSE)[,-1]
 
 # custom functions
 '%ni%' <- Negate('%in%')
@@ -40,14 +39,14 @@ b1_norm <- b1_norm %>% dplyr::select(!Internal_Standard)
 b2_norm <- b2_norm %>% dplyr::select(!Internal_Standard)
 
 # load metadata
-meta <- read.csv('Radica sample filenames aligned with clinical metadata.csv')
+meta <- read.csv('RADicA_VOC_metadata.csv')
 
 ################################
 
 ## format datasets
 # specify dataset for analysis
-b_norm <- b1_norm
-dat <- 'B1'
+b_norm <- b1_norm # b2_norm
+dat <- 'B1' # 'B2
 
 #
 #
@@ -58,13 +57,13 @@ b_norm_L <- b_norm %>% pivot_longer(cols =! c(1:4), names_to = 'comp', values_to
 #b_norm_L$Analysis_date <- as.Date(b_norm_L$Analysis_date, format = '%d/%m/%Y')
 
 b_imp_c <- b_norm_L %>% filter(class %in% c('BG','S1', 'S2')) %>%
-  left_join(meta %>% dplyr::select(Sample_ID, CoreVisit, RAD_ID),
+  left_join(meta %>% dplyr::select(Sample_ID, CoreVisit, ID),
             by = c('Sample' = 'Sample_ID')) %>%
   filter(CoreVisit %in% c('CV1', 'CV2')) %>%
-  mutate(Sample = paste(RAD_ID, CoreVisit, sep = '_'))
+  mutate(Sample = paste(ID, CoreVisit, sep = '_'))
 
 b_imp_c1 <- b_imp_c %>%
-  pivot_wider(id_cols = c(RAD_ID, comp, Analysis_date, CoreVisit, Batch, Sample), 
+  pivot_wider(id_cols = c(ID, comp, Analysis_date, CoreVisit, Batch, Sample), 
               names_from = class, values_from = peakArea) 
 #
 #
@@ -83,9 +82,9 @@ gauss1_icc <- bind_rows(lapply(unique(b_imp_c2$comp), function(voc){
   test <- b_imp_c2 %>% filter(comp == voc) %>%
     pivot_longer(cols = c(S1, S2), names_to = 'Replicate', values_to = 'peakArea')
   
-  mod <- lmer(peakArea ~ Replicate + (1 | RAD_ID) + (1| RAD_ID:CoreVisit),
+  mod <- lmer(peakArea ~ Replicate + (1 | ID) + (1| ID:CoreVisit),
               data = test)
-  mod1 <- lmer(peakArea ~ Replicate*CoreVisit + (1 | RAD_ID),
+  mod1 <- lmer(peakArea ~ Replicate*CoreVisit + (1 | ID),
                data = test)
   
   vcov <- as.data.frame(VarCorr(mod), comp = 'Variance')[,c(1,4)]
@@ -122,7 +121,7 @@ plot(gauss1_icc$icc_consistency, gauss1_icc$icc_cvgen_consistency)
 #
 #
 
-# save dataset specific results
+# save dataset-specific results
 b1_icc <- gauss1_icc
 b1_imp_c1 <- b_imp_c1
 

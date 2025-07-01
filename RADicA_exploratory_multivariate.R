@@ -2,7 +2,7 @@
 
 # author: Aggie Turlo
 # project: RADicA
-# date: 17/07/2024
+# date: 01/07/2025
 
 #####################
 
@@ -20,12 +20,12 @@ library(pcaPP)
 library(ggrepel)
 
 ## load data
-# load the file with corrected and uncorrected VOC peak areas
+# load the file with corrected VOC peak areas
 b1_corr <- read.csv('RADicA_B1_BG_adjusted.csv')[,-1] 
 b2_corr <- read.csv('RADicA_B2_BG_adjusted.csv')[,-1]
 
 # load metadata
-meta <- read.csv('Radica sample filenames aligned with clinical metadata.csv')
+meta <- read.csv('RADicA_VOC_metadata.csv')
 
 # load VOC origin annotations
 endo_exo <- read.csv('Endo_Exo_filters.csv')[,-1] %>%
@@ -42,13 +42,19 @@ infl_obs <- read.csv('Deletion_diagnostics_formatted_B2.csv')
 #
 #
 
+# remove samples from the same patients from B2 (information leakage)
+rep <- intersect(b1_corr$ID, b2_corr$ID)
+
+b2_corr <- b2_corr %>% filter(ID %ni% rep)
+
+
 ## Principal Component Analysis of corrected and uncorrected breath data
 # transform data to wide format
 pivot_wide <- function(data, values){
   data_w <- data %>%
-    dplyr::select(c(Sample, comp, values, CoreVisit, RAD_ID)) %>%
+    dplyr::select(c(Sample, comp, values, CoreVisit, ID)) %>%
     pivot_wider(names_from = comp, values_from = values) %>% 
-    left_join(meta %>% dplyr::select(RAD_ID, Diagnosis), relationship = 'many-to-many') %>%
+    left_join(meta %>% dplyr::select(ID, Diagnosis), relationship = 'many-to-many') %>%
     distinct() %>%
     relocate(Diagnosis) %>% 
     as.data.frame()
@@ -86,7 +92,7 @@ swatch(my_pal)
 
 plot_pca <- function(pca_b, data, Title){
   p <- plotIndiv(pca_b,
-            #ind.names = data$RAD_ID,
+            #ind.names = data$ID,
             group = data$Diagnosis,
             legend = TRUE, 
             comp = c(1,2),
@@ -167,8 +173,8 @@ ggsave('fig1.tiff', unit = 'mm', dpi = 300, width = 157, height = 160)
 ## Multivariate outlier detection in BG corrected datasets
 # detect multivariate outliers using robust PCA
 # specify dataset for analysis
-data <- b1_corr_w
-dat <- 'B1'
+data <- b2_corr_w
+dat <- 'B2'
 
 #
 assay <- data[,-c(1:4)]

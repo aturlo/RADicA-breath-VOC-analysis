@@ -5,8 +5,6 @@
 # date: 25/02/2025
 
 #####################
-
-
 library(dplyr)
 library(tidyr)
 library(ggplot2)
@@ -411,10 +409,10 @@ tree_df <- data.frame(main = rep('Entry', 4),
                       Diag = c(rep('A', 3), 'NA'))
 
 
-edges_level1_1 <- tree_df %>% select(main, FeNO) %>% unique %>% rename(from = main, to = FeNO)
-edges_level1_2 <- tree_df %>% select(FeNO, BDR) %>% unique %>% rename(from = FeNO, to = BDR)
-edges_level2_3 <- tree_df %>% select(BDR, BCT) %>% unique %>% rename(from = BDR, to = BCT)
-edges_level3_4 <- tree_df %>% select(BCT, Diag) %>% unique %>% rename(from = BCT, to = Diag)
+edges_level1_1 <- tree_df %>% dplyr::select(main, FeNO) %>% unique %>% rename(from = main, to = FeNO)
+edges_level1_2 <- tree_df %>% dplyr::select(FeNO, BDR) %>% unique %>% rename(from = FeNO, to = BDR)
+edges_level2_3 <- tree_df %>% dplyr::select(BDR, BCT) %>% unique %>% rename(from = BDR, to = BCT)
+edges_level3_4 <- tree_df %>% dplyr::select(BCT, Diag) %>% unique %>% rename(from = BCT, to = Diag)
 
 edge_list = rbind(edges_level1_1, edges_level1_2, edges_level2_3)
 
@@ -426,7 +424,7 @@ mygraph1 <- permute(mygraph, permutation = c(1:5, 7, 6))
 nice_tree <- ggraph(mygraph, layout = 'dendrogram') + 
   geom_edge_elbow() +
   theme_void() +
-  geom_node_text(label = c('FeNO > 50ppb', NA, 'BDR > 12% FEV1', NA, NA, 'BCT PD20 < 0.2mg', NA, NA, NA),
+  geom_node_text(label = c('FeNO > 50ppb', NA, 'BDR > 12% FEV1', NA, NA, 'BCTmeth PD20 < 0.2mg', NA, NA, NA),
                  nudge_y = 0.2, nudge_x = -0.2, colour = my_pal[[7]], fontface = 'bold', size = 3) 
 
 nice_tree
@@ -866,34 +864,34 @@ pals <- grafify::graf_palettes
 my_pal = pals$fishy
 swatch(my_pal)
 
-vip_plot <- stab_res_sum %>% filter(n == 1000) %>%
-  arrange(desc(mean_imp)) %>%
-  ggplot(aes(x = mean_imp, y = fct_inorder(as.factor(pred)), fill = pred)) +
-  geom_col(colour = 'black', lwd = 0.3) +
-  geom_errorbar(aes(xmin = mean_imp - sd_imp, xmax = mean_imp + sd_imp),
-                width = 0.4) +
+vip_plot <- stab_res %>% filter(n == 1000) %>%
+  ggplot(aes(x = imp, y = factor(pred, levels = c('BCTcat', 'BDRcat', 'Ethyl_butanoate_CV1',
+                                                  'Furan._2_methyl__CV1', 'X3_methylpentane_CV1',
+                                                  'FeNOCV1cat')), fill = pred)) +
+  geom_jitter(alpha = 0.3, size = 0.2) +
+  geom_boxplot(outliers = FALSE, lwd = 0.2) +
   theme_bw(base_size = 8) +
   theme(legend.position = 'none') +
   ylab('') +
   xlab('Variable importance') +
   ggtitle('Variable importance in random forest model') +
-  theme(plot.title = element_text(hjust = 0.9, face = 'bold', size = 8),
+  theme(plot.title = element_text(hjust = 0.99, face = 'bold', size = 8, vjust = 1),
         panel.grid = element_blank(),
-        plot.margin = unit(c(0.1, 0.1, 0.1, 0.5), 'cm')) +
+        plot.margin = unit(c(0.5, 0.3, 0.1, 0.7), 'cm')) +
   scale_fill_manual(values = c('BCTcat' = my_pal[[6]],
                                'BDRcat' = my_pal[[5]],
                                'Ethyl_butanoate_CV1' = my_pal[[7]],
                                'Furan._2_methyl__CV1' = my_pal[[3]],
                                'X3_methylpentane_CV1' = my_pal[[8]],
                                'FeNOCV1cat' = my_pal[[9]])) +
-  scale_y_discrete(labels = c('BCT',
+  scale_y_discrete(labels = c('BCTmeth PD20',
                                'BDR',
-                               'Ethyl butanoate',
-                               'Furan-2-methyl',
-                               '3_methylpentane',
+                               'ethyl butanoate',
+                               '2-Methylfuran',
+                               '3-Methylpentane',
                                'FeNO')) +
-  annotate(geom = 'text', label = '*', x = 0.2, y = 1)  +
-  annotate(geom = 'text', label = '*', x = 0.1, y = 2)
+  annotate(geom = 'text', label = '*', x = 0.205, y = 1, fontface = 'bold')  +
+  annotate(geom = 'text', label = '*', x = 0.1, y = 2, fontface = 'bold')
 
 vip_plot
 

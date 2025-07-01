@@ -2,12 +2,11 @@
 
 # author: Aggie Turlo
 # project: RADicA
-# date: 17/01/2025
+# date: 30/06/2025
 
 ###############################
 
-library(dplyr)
-library(tidyr)
+library(tidyverse)
 library(ggplot2)
 library(pheatmap)
 library(tibble)
@@ -24,14 +23,14 @@ library(grafify)
 
 ## load data
 # load filtered study data with missing values
-b1_all_f <- read.csv('RADicA_B1_NAfiltered.csv')[,-1]
-b2_all_f <- read.csv('RADicA_B2_NAfiltered.csv')[,-1]
+b1_all_f <- read.csv('RADicA_B1_NAfiltered.csv', check.names = FALSE)[,-1]
+b2_all_f <- read.csv('RADicA_B2_NAfiltered.csv', check.names = FALSE)[,-1]
 
 rownames(b1_all_f) <- b1_all_f$Sample
 rownames(b2_all_f) <- b2_all_f$Sample
 
 # load metadata
-meta <- read.csv('Radica sample filenames aligned with clinical metadata.csv')
+meta <- read.csv('RADicA_VOC_metadata.csv')
 
 # custom functions
 '%ni%' <- Negate('%in%')
@@ -42,8 +41,8 @@ meta <- read.csv('Radica sample filenames aligned with clinical metadata.csv')
 
 ## EXPLORATION OF MISSING DATA TYPES
 # specify dataset for analysis
-b_all_f <- b1_all_f
-dat <- 'B1'
+b_all_f <- b2_all_f # b1_all_f
+dat <- 'B2' # 'B1
 
 #
 
@@ -73,7 +72,6 @@ dev.off()
 ################################
 
 # Figure S2B
-
 medVSna_b1 <- sumint %>% filter(class %in% c('S1', 'S2')) %>%
   ggplot(aes(x = med, y = nonas)) +
   geom_point(alpha = 0.6, size = 0.8) + theme_bw(base_size = 10) +
@@ -111,15 +109,15 @@ sumint %>% group_by(class) %>% summarise(complete_var = sum(nonas == 0)/n_distin
 
 # Fraction of different types of missingness across breath samples
 s_tech <- b_all_fL %>% filter(class %in% c('S1', 'S2')) %>%
-  left_join(meta %>% dplyr::select(Sample_ID, Analysis_date, CoreVisit, RAD_ID),
+  left_join(meta %>% dplyr::select(Sample_ID, Analysis_date, CoreVisit, ID),
             by = c('Sample' = 'Sample_ID')) %>%
   #mutate(Sample = str_sub(Sample, end = -13)) %>% # Batch 1
-  pivot_wider(id_cols = c(RAD_ID, comp, Batch, Analysis_date, CoreVisit), 
+  pivot_wider(id_cols = c(ID, comp, Batch, Analysis_date, CoreVisit), 
               names_from = class, values_from = peakArea) %>%
   mutate(techNA = ifelse(is.na(S1) & is.na(S2), 'Missing2', 
                          ifelse(is.na(S1) | is.na(S2), 'Missing1', 
                                 'Non-missing'))) %>%
-  mutate(Sample = paste(RAD_ID, CoreVisit, sep = '_'))
+  mutate(Sample = paste(ID, CoreVisit, sep = '_'))
 
 s_sum <- s_tech %>% group_by(techNA, Batch) %>% summarise(n = n()) 
 
@@ -148,7 +146,7 @@ Mis2 <- s_tech %>% filter(techNA == 'Missing2') %>%
 
 violin_plots <- s_tech %>% filter(techNA != 'Missing2') %>%
   pivot_longer(cols = c(S1, S2) , names_to = 'Replicate', values_to = 'peakArea') %>%
-  mutate(Sample = paste(RAD_ID, CoreVisit, sep = '_')) %>%
+  mutate(Sample = paste(ID, CoreVisit, sep = '_')) %>%
   group_by(Sample) %>%
   do(plots = ggplot(data = ., aes(x = techNA, y = log(peakArea), colour = Replicate)) +
        geom_violin(aes(colour = Replicate), position = position_dodge(0.9)) + 
@@ -170,8 +168,8 @@ my_pal = pals$fishy
 
 s3_b1 <- s_tech %>% filter(techNA != 'Missing2') %>%
   pivot_longer(cols = c(S1, S2) , names_to = 'Replicate', values_to = 'peakArea') %>%
-  mutate(Sample = paste(RAD_ID, CoreVisit, sep = '_')) %>%
-  filter(Sample %in% c('RAD002_CV1', 'RAD002_CV2')) %>%
+  mutate(Sample = paste(ID, CoreVisit, sep = '_')) %>%
+  filter(Sample %in% c('ID1_CV1', 'ID1_CV2')) %>%
   ggplot(aes(x = techNA, y = log(peakArea), colour = Replicate)) +
   geom_violin(aes(colour = Replicate), position = position_dodge(0.9)) + 
   geom_boxplot(aes(colour = Replicate), position = position_dodge(0.9), width = 0.1) + 
@@ -189,8 +187,8 @@ s3_b1
 
 s3_b2 <- s_tech %>% filter(techNA != 'Missing2') %>%
   pivot_longer(cols = c(S1, S2) , names_to = 'Replicate', values_to = 'peakArea') %>%
-  mutate(Sample = paste(RAD_ID, CoreVisit, sep = '_')) %>%
-  filter(Sample %in% c('RAD110_CV1', 'RAD110_CV2')) %>%
+  mutate(Sample = paste(ID, CoreVisit, sep = '_')) %>%
+  filter(Sample %in% c('ID56_CV1', 'ID56_CV2')) %>%
   ggplot(aes(x = techNA, y = log(peakArea), colour = Replicate)) +
   geom_violin(aes(colour = Replicate), position = position_dodge(0.9)) + 
   geom_boxplot(aes(colour = Replicate), position = position_dodge(0.9), width = 0.1) + 
@@ -311,7 +309,6 @@ dev.off()
 ##################################
 
 # Figure S3
-
 s3_a <- heatmap1
 s3_b <- heatmap1
 
@@ -333,7 +330,7 @@ dev.off()
 
 # IMPUTATION
 # specify dataset for analysis
-df <- b2_all_f
+df <- b1_all_f # b2_all_f
 rownames(df) <- df$Sample
 
 #
@@ -344,8 +341,7 @@ rownames(df) <- df$Sample
 cor_vals <- cor(log(df[,-c(1:5)]), use = 'pairwise.complete.obs')
 sum(table(cor_vals[cor_vals > 0.5]) %>% as.data.frame() %>% dplyr::select(Freq))/(243^2)
 
-
-# create assay dataset for each class
+# create assay dataset (VOC peak areas only) for each class
 assay <- function(x){
   df %>% filter(class == x) %>% dplyr::select(6:ncol(.))
 }
@@ -391,6 +387,7 @@ b_imp_L <- rbind(es_impL, blank_impL, bg_impL, s1_impL, s2_impL)
 #
 #
 
+# save the outputs
 # change new object name accordingly
 b1_imp <- b_imp_L %>% pivot_wider(names_from = comp, values_from = peakArea)
 b2_imp <- b_imp_L %>% pivot_wider(names_from = comp, values_from = peakArea)
@@ -408,7 +405,7 @@ write.csv(b2_imp, 'RADicA_B2_NAfiltered_imputed.csv')
 # specify dataset for analysis
 b_imp <- b1_imp %>% as.data.frame()
 b_all_f <- b1_all_f  %>% filter(Sample %ni% '200131_RaDICA_Batch372_tracker_497813_1')
-dat <- 'B2'
+dat <- 'B1'
 
 # change data format to long
 b_imp_L <- b_imp %>% pivot_longer(cols = c(6:ncol(b_imp)), names_to = 'comp', values_to = 'peakArea')
@@ -599,8 +596,8 @@ pc_s1_i <- plot_pca(b_imp_s1, b_s1_f, 'S1')
 pc_s2_c <- plot_pca(b_s2_f_c, b_s2_f, 'S2')
 pc_s2_i <- plot_pca(b_imp_s2, b_s2_f, 'S2')
 
-pc_plots <- arrangeGrob(pc_blank_c$graph, pc_es_c$graph, pc_bg_c$graph, pc_s1_c$graph, pc_s2_c$graph,
-                        pc_blank_i$graph, pc_es_i$graph, pc_bg_i$graph, pc_s1_i$graph, pc_s2_i$graph,
+pc_plots <- arrangeGrob(pc_blank_c, pc_es_c, pc_bg_c, pc_s1_c, pc_s2_c,
+                        pc_blank_i, pc_es_i, pc_bg_i, pc_s1_i, pc_s2_i,
                         ncol = 5, nrow = 2)
 
 dev.new()
@@ -699,20 +696,20 @@ dev.off()
 
 ## Effect of imputation on technical replicates in breath samples
 s_tech <- b_all_fL %>% filter(class %in% c('S1', 'S2')) %>%
-  left_join(meta %>% dplyr::select(Sample_ID, Analysis_date, CoreVisit, RAD_ID),
+  left_join(meta %>% dplyr::select(Sample_ID, Analysis_date, CoreVisit, ID),
             by = c('Sample' = 'Sample_ID')) %>%
   #mutate(Sample = str_sub(Sample, end = -13)) %>% # Batch 1
-  pivot_wider(id_cols = c(RAD_ID, comp, Batch, Analysis_date, CoreVisit), 
+  pivot_wider(id_cols = c(ID, comp, Batch, Analysis_date, CoreVisit), 
               names_from = class, values_from = peakArea) %>%
   mutate(techNA = ifelse(is.na(S1) & is.na(S2), 'Missing2', 
                          ifelse(is.na(S1) | is.na(S2), 'Missing1', 
                                 'Non-missing'))) %>%
-  mutate(Sample = paste(RAD_ID, CoreVisit, sep = '_'))
+  mutate(Sample = paste(ID, CoreVisit, sep = '_'))
 
 s_tech_imp <- b_imp_L %>% filter(class %in% c('S1', 'S2')) %>%
-  left_join(meta %>% dplyr::select(Sample_ID, Analysis_date, CoreVisit, RAD_ID),
+  left_join(meta %>% dplyr::select(Sample_ID, Analysis_date, CoreVisit, ID),
             by = c('Sample' = 'Sample_ID')) %>%
-  mutate(Sample = paste(RAD_ID, CoreVisit, sep = '_')) %>%
+  mutate(Sample = paste(ID, CoreVisit, sep = '_')) %>%
   dplyr::select(!Time) %>%
   pivot_wider(id_cols = c(Sample, comp), names_from = class, values_from = peakArea) %>%
   left_join(s_tech %>% dplyr::select(Sample, comp, Batch, techNA))

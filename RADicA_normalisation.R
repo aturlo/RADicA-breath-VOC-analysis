@@ -2,12 +2,11 @@
 
 # author: Aggie Turlo
 # project: RADicA
-# date: 20/01/2025
+# date: 30/06/2025
 
 #####################
 
-library(dplyr)
-library(tidyr)
+library(tidyverse)
 library(ggplot2)
 library(tibble)
 library(mixOmics)
@@ -20,46 +19,46 @@ library(gridExtra)
 
 ## load data
 # load study data with imputed values
-b1_imp <- read.csv('RADicA_B1_NAfiltered_imputed.csv')[,-1]
-b2_imp <- read.csv('RADicA_B2_NAfiltered_imputed.csv')[,-1]
+b1_impt <- read.csv('RADicA_B1_NAfiltered_imputed.csv', check.names = FALSE)[,-1]
+b2_impt <- read.csv('RADicA_B2_NAfiltered_imputed.csv', check.names = FALSE)[,-1]
 
-rownames(b1_imp) <- b1_imp$Sample
-rownames(b2_imp) <- b2_imp$Sample
+rownames(b1_impt) <- b1_impt$Sample
+rownames(b2_impt) <- b2_impt$Sample
 
-meta <- read.csv('Radica sample filenames aligned with clinical metadata.csv')
+meta <- read.csv('RADicA_VOC_metadata.csv')
 
 # custom functions
 '%ni%' <- Negate('%in%')
 
 ################################
 
-# format imputed dataset
-# specify dataset for analysis
-b_imp <- b2_imp
-
+# format imputed datasets
+format <- function(data) {
 ## replace analysis date recorded by GCMS with collection date
-b_imp_L <- b_imp %>% pivot_longer(cols = c(6:ncol(b_imp)), names_to = 'comp', values_to = 'peakArea') %>%
+  b_imp_L <- data %>% pivot_longer(cols = c(6:ncol(data)), names_to = 'comp', values_to = 'peakArea') %>%
   mutate(peakArea = ifelse(peakArea < 10, 10, peakArea)) # replace imputed peak area values < 10 with 10
-
-
-b_imp <- b_imp_L %>% pivot_wider(names_from = comp, values_from = peakArea) %>%
-  mutate(Analysis_date = paste(str_sub(Sample, start = 5, end = 6),
+  
+  b_imp <- b_imp_L %>% pivot_wider(names_from = comp, values_from = peakArea) %>%
+    mutate(Analysis_date = paste(str_sub(Sample, start = 5, end = 6),
                                str_sub(Sample, start = 3, end = 4),
                                20, str_sub(Sample, start = 1, end = 2),
                                sep = '')) %>%
-  relocate(Analysis_date) %>%
-  dplyr::select(!c(Date, Time))
+    relocate(Analysis_date) %>%
+    dplyr::select(!c(Date, Time)) %>%
+    mutate(Analysis_date  = as.Date(Analysis_date, format = '%d%m%Y'))
+           }
 
-b_imp$Analysis_date <- as.Date(b_imp$Analysis_date, format = '%d%m%Y')
-rownames(b_imp) <- b_imp$Sample
 
 #
 #
 #
 
-b1_imp <- b_imp
-b2_imp <- b_imp
+# apply to both datasets
+b1_imp <- format(b1_impt)
+b2_imp <- format(b2_impt)
 
+rownames(b1_imp) <- b1_imp$Sample
+rownames(b2_imp) <- b2_imp$Sample
 
 #
 #
@@ -69,13 +68,19 @@ b2_imp <- b_imp
 
 # NORMALISATION OF IMPUTED DATA
 # specify dataset for analysis
-b_imp <- b2_imp
-dat <- 'B2'
+b_imp <- b1_imp # b2_imp
+dat <- 'B1' # 'B2
+
+#
+#
+#
 
 b_imp_L <- b_imp %>% pivot_longer(cols = c(6:ncol(b_imp)), names_to = 'comp', values_to = 'peakArea')
 
 # Internal Standard normalisation (IS)
-b_IS <- cbind(b_imp[,1:4], b_imp[,5:ncol(b_imp)]/b_imp$Internal_Standard) %>%
+ref <- b_imp[,colnames(b_imp) == 'Internal_Standard']
+
+b_IS <- cbind(b_imp[,1:4], b_imp[,5:ncol(b_imp)]/ref$Internal_Standard) %>%
   dplyr::select(!Internal_Standard)
 
 #
@@ -84,7 +89,7 @@ b_IS <- cbind(b_imp[,1:4], b_imp[,5:ncol(b_imp)]/b_imp$Internal_Standard) %>%
 
 ## Component correction (CC)
 # remove VOCs not represented in reference sample class in either dataset
-data <- b2_imp
+data <- b_imp
 
 data <- as.data.frame(data)
 rownames(data) <- data$Sample
@@ -193,6 +198,9 @@ annot <- data %>%
 b_cc <- cbind(annot[,1:4], exp(Zres1))
 b_cc2 <- cbind(annot[,1:4], exp(Zres)) # reverse log transformation
 
+# use code below when processing dataset 2
+b2_cc <- cbind(annot[,1:4], exp(Zres1))
+b2_cc2 <- cbind(annot[,1:4], exp(Zres))
 
 #
 #
@@ -224,23 +232,23 @@ pqn <- function(ref, data) {
 }
 
 
-b_pqn <- pqn(b_imp, b_imp) # change to b2_imp for B1 - use the same reference for both
+b_pqn <- pqn(b2_imp, b_imp) 
 
 #
 #
 #
 
 # CC + PQN
-b2_cc2 <- b_cc2
-
-b2_cc2_pqn <- pqn(b2_cc2, b2_cc2) # change to b2_cc2 for B1 - use the same reference for both
+b2_cc2_pqn <- pqn(b2_cc2, b2_cc2)
 b1_cc2_pqn <- pqn(b2_cc2, b_cc2)
 
 plotIndiv(pca(log(b2_cc2_pqn[,-c(1:4)]), scale = TRUE), pch = 1)
+plotIndiv(pca(log(b1_cc2_pqn[,-c(1:4)]), scale = TRUE), pch = 1)
 
 # save normalised dataset
 write.csv(b1_cc2_pqn, 'RADicA_B1_NAfiltered_imputed_CC2_PQN.csv') # amend file name depending on dataset
 write.csv(b2_cc2_pqn, 'RADicA_B2_NAfiltered_imputed_CC2_PQN.csv')
+
 #
 #
 #
@@ -272,7 +280,7 @@ disp_IS <- disp(b_IS, 'IS')
 disp_cc <- disp(b_cc, 'CC')
 disp_cc2 <- disp(b_cc2, 'CC2')
 disp_pqn <- disp(b_pqn, 'PQN')
-disp_cc2_pqn <- disp(b2_cc2_pqn, 'CC2 PQN')
+disp_cc2_pqn <- disp(b1_cc2_pqn, 'CC2 PQN') # change to b2_cc2_pqn for dataset 2
 
 #
 
@@ -298,7 +306,10 @@ plot_disp <- function(m) { # m = dispersion measure: RSD, rIQR, rMAD
         panel.spacing = unit(0, 'mm'),
         axis.text = element_text(size = 6),
         panel.grid = element_blank()) +
-    scale_fill_grafify(palette = 'fishy')}
+    scale_fill_grafify(palette = 'fishy') +
+    scale_x_continuous(
+      labels = scales::number_format(accuracy = 0.1))
+  }
 
 
 rsd_p <- plot_disp('rsd') + theme(legend.position = 'none') #+ 
@@ -401,7 +412,7 @@ pqn_class <- PCA_plot(b_pqn %>%
                        'PQN')
 
 
-cc_pqn_class <- PCA_plot(b2_cc2_pqn %>% 
+cc_pqn_class <- PCA_plot(b1_cc2_pqn %>% # change to b2_cc2_pqn for dataset 2
                      filter(class %ni% c('Blank')), 
                    'CC2 PQN')
 
@@ -434,6 +445,7 @@ s5c_b2 <- arrangeGrob(raw_class, is_class, pqn_class,
 
 plot(s5c_b2)
 
+
 s5c_b1 <- arrangeGrob(raw_class, is_class, pqn_class, 
                       cc2_class, cc_pqn_class, leg5c,
                       ncol = 2, nrow = 3,
@@ -452,15 +464,14 @@ plot(s5c)
 
 ###############################
 
-# Assemble FigureS5
-
+# Assemble Figure S5
 s5 <- plot_grid(s5c, s5b, nrow = 2, rel_heights = c(0.55, 0.45),
                 labels = c('a)', 'b)'), label_size = 12)
 plot(s5)
 
 ggsave('figs5.tiff', s5, unit = 'mm', dpi = 300, width = 157, height = 220)
 
-pdf('FigureS6.pdf', width = 6.18, height = 8.66)
+pdf('FigureS5.pdf', width = 6.18, height = 8.66)
 plot(s5)
 dev.off()
 

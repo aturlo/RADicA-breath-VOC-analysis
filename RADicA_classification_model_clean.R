@@ -2,13 +2,12 @@
 
 # author: Aggie Turlo
 # project: RADicA
-# date: 10/02/2025
+# date: 01/07/2025
 
 #####################
 
 
-library(dplyr)
-library(tidyr)
+library(tidyverse)
 library(ggplot2)
 library(tibble)
 library(gridExtra)
@@ -25,19 +24,18 @@ library(cowplot)
 library(purrr)
 
 # load data
-# load summarised BG corrected datasets 
-b1_corr_w <- read.csv('RADicA_B1_BG_adjusted.csv')[,-1]
-b2_corr_w <- read.csv('RADicA_B2_BG_adjusted.csv')[,-1]
-
 # load summarised BG corrected datasets w/o multivariate outliers
 b1_corr_out <- read.csv('RADicA_BG_adjusted_B1_outl_removed.csv')[,-1]
 b2_corr_out <- read.csv('RADicA_BG_adjusted_B2_outl_removed.csv')[,-1]
 
 # load metadata
-meta <- read.csv('Radica sample filenames aligned with clinical metadata.csv')[,-1]
+meta <- read.csv('RADicA_VOC_metadata.csv')[,-1]
 
 # load VOC origin annotation based on logFC analysis
 endo_exo <- endo_exo <- read.csv('Endo_Exo_filters.csv')[,-1] 
+
+#
+'%ni%' <- Negate('%in%')
 
 #
 
@@ -46,7 +44,7 @@ endo_exo <- endo_exo <- read.csv('Endo_Exo_filters.csv')[,-1]
 b1_corr_out <- b1_corr_out[names(b2_corr_out)]
 
 # remove patient IDs repeated between datasets
-b2_corr_out <- b2_corr_out %>% filter(RAD_ID %ni% intersect(b1_corr_out$RAD_ID, b2_corr_out$RAD_ID))
+b2_corr_out <- b2_corr_out %>% filter(ID %ni% intersect(b1_corr_out$ID, b2_corr_out$ID))
 
 #
 #
@@ -79,8 +77,6 @@ spec_fun <- function(conf_mat){
   print(spec)
 }
 
-#
-'%ni%' <- Negate('%in%')
 
 #
 #
@@ -103,7 +99,7 @@ icc_b2 <- bind_rows(lapply(vocs, function(voc){
     pivot_wider(names_from = CoreVisit, values_from = peakArea) %>%
     as.data.frame()
   
-  rownames(input) <- input$RAD_ID
+  rownames(input) <- input$ID
   input <- input[,c(4:5)]
   
   icc_res <- icc(input, model = 'twoway', type = 'consistency', unit = 'single') #columns and rows random
@@ -145,7 +141,7 @@ roc_fun <- function(voc, data){
   resp <- data$Diagnosis
   pred <- data %>% dplyr::select(voc)
   colnames(pred) <- 'VOC'
-  clusID <- data$RAD_ID
+  clusID <- data$ID
   data1 <- cbind(pred, resp, clusID)
   
   out_roc_voc <- as.data.frame(doAUCcluster(predictor1 = data1$VOC,
@@ -164,21 +160,25 @@ b1_top <- voc_roc_b1 %>% filter(auc > 0.60)
 
 intersect(b2_top$comp, b1_top$comp)
 
-#
-
-voc_roc_b1_cv1 <- bind_rows(lapply(colnames(b1_corr_out_cv1[, -c(1:4)]), roc_fun, data = b1_corr_out_cv1))
-voc_roc_b1_cv2 <- bind_rows(lapply(colnames(b1_corr_out_cv2[, -c(1:4)]), roc_fun, data = b1_corr_out_cv2))
 
 # concatenate results from two datasets at each time point
 comp_auc <- voc_roc_b2 %>% dplyr::select(comp, auc) %>% distinct() %>%
   rename(auc_b2 = auc) %>%
   left_join(voc_roc_b1 %>% dplyr::select(comp, auc) %>% distinct()) %>%
   rename(auc_b1 = auc) %>%
-  mutate(lab = ifelse(auc_b2 > 0.6 & auc_b1 > 0.6, 'yes', 'no'),
+  mutate(lab = ifelse(auc_b2 > 0.59 & auc_b1 > 0.59, 'yes', 'no'),
          name = ifelse(lab == 'yes', comp, NA)) %>%
   left_join(endo_exo)
 
-#
+# correct name labels
+name <- comp_auc$name[is.na(comp_auc$name) == FALSE]
+corr_names <- c('ethyl butanoate', '2-methylfuran', '3-methylpentane')
+
+names_corr <- cbind(name, corr_names)
+
+comp_auc <- comp_auc %>% left_join(as.data.frame(names_corr))
+
+# 
 
 # plot relationship between AUROC from two datasets
 pals <- grafify::graf_palettes
@@ -188,17 +188,19 @@ swatch(my_pal)
 plot2b <- comp_auc %>%
   ggplot(aes(x = auc_b2, y = auc_b1, fill = lab)) +
   geom_point(size = 0.9, shape = 21) +
-  geom_vline(xintercept = 0.6, linetype = 'dashed', colour = 'darkgrey', lwd = 0.3) +
-  geom_hline(yintercept = 0.6, linetype = 'dashed', colour = 'darkgrey', lwd = 0.3) +
+  geom_vline(xintercept = 0.59, linetype = 'dashed', colour = 'darkgrey', lwd = 0.3) +
+  geom_hline(yintercept = 0.59, linetype = 'dashed', colour = 'darkgrey', lwd = 0.3) +
   theme_bw(base_size = 8) +
   scale_fill_manual(values = c('yes' = my_pal[[7]], 'no' = 'white')) +
-  geom_text_repel(aes(label = name), colour = 'purple', size = 2,
+  geom_text_repel(aes(label = corr_names), colour = 'purple', size = 2,
                   nudge_x = 0.1, direction = 'y', nudge_y = 0.015, fontface = 'bold') +
   theme(plot.title = element_text(hjust = 0.5, size = 8, face = 'bold'),
         legend.position = 'none',
         panel.grid = element_blank()) +
   xlab('Training dataset') + ylab('Validation dataset') +
   ggtitle('Area under the Receiver Operating Characteristic \n curve for breath VOCs')
+
+plot2b
 
 ggsave('AUROC_B1_B2_indi_VOCs.tiff', unit = 'mm', width = 90, height = 80)
 
@@ -218,7 +220,7 @@ plot(plot2ab)
 
 
 # Figure 2c
-cols <- c('Diagnosis', 'RAD_ID', 'CoreVisit', 'Ethyl_butanoate', 'Furan._2_methyl_', 'X3_methylpentane')
+cols <- c('Diagnosis', 'ID', 'CoreVisit', 'Ethyl_butanoate', 'Furan._2_methyl_', 'X3_methylpentane')
 
 comm_out <- b1_corr_out[, colnames(b1_corr_out) %in% cols] %>%
   mutate(dataset = 'Validation dataset') %>%
@@ -247,8 +249,8 @@ plot2c_fun <- function(voc) {
   }
   
 
-plot2c1 <- plot2c_fun('Ethyl_butanoate') + ggtitle('Ethyl butanoate')
-plot2c2 <- plot2c_fun('Furan._2_methyl_') + ggtitle('Furan-2-methyl') +
+plot2c1 <- plot2c_fun('Ethyl_butanoate') + ggtitle('ethyl butanoate')
+plot2c2 <- plot2c_fun('Furan._2_methyl_') + ggtitle('2-methylfuran') +
   theme(plot.margin = unit(c(0.2, 0.15, 0.1, 0.1), 'cm'))
 plot2c3 <- plot2c_fun('X3_methylpentane') + ggtitle('3-methylpentane') +
   theme(axis.title.x = element_text(),
@@ -286,7 +288,7 @@ dev.off()
 # MULTIVARIATE CLASSIFICATION MODEL
 # MINT PLS-DA
 # specify data for analysis
-train <- b1_corr_out
+train <- b2_corr_out
 
 #
 rownames(train) <- train$Sample
@@ -341,16 +343,20 @@ resp <- test$Diagnosis
 resp[resp == 'Asthma'] <- 1
 resp[resp == 'Not Asthma'] <- 0
 
+#
 roc_train <- roc(response = resp, predictor = dummy_train$Asthma)
 auc(roc_train)
 coords(roc_train, "best", ret = "threshold")
+
+#
+roc_test <- roc(response = resp, predictor = dummy_train$Asthma)
 
 # save ROC curve plots
 tiff('ROC_MINT.tiff', unit = 'mm', res = 300, width = 90, height = 45)
 par(mfrow = c(1,2))
 plot(roc_train, legacy.axes = TRUE, main = 'Training dataset', cex.main = 0.9, cex.lab = 0.8, cex.axis = 0.7,
      mar = c(2,2,1,0.1), mgp = c(1,0.2,0), tck = -0.02)
-plot(roc_train, legacy.axes = TRUE, main = 'Test dataset', cex.main = 0.9, cex.lab = 0.8, cex.axis = 0.7,
+plot(roc_test, legacy.axes = TRUE, main = 'Test dataset', cex.main = 0.9, cex.lab = 0.8, cex.axis = 0.7,
      mar = c(2,2,1,0.1), mgp = c(1,0.2,0), tck = -0.02)
 dev.off()
 
@@ -358,7 +364,7 @@ dev.off()
 # agreement between predictions for the same patient
 out_train1 <- out_train %>% 
   mutate(Sample = rownames(.),
-         RAD_ID = str_sub(Sample, end = 6),
+         ID = str_sub(Sample, end = 6),
          CoreVisit = str_sub(Sample, start = 8)) %>%
   dplyr::select(!Sample) %>%
   pivot_wider(names_from = CoreVisit, values_from = comp1) %>%
@@ -369,16 +375,16 @@ table(out_train1$agree)
 # patient-level prediction
 dummy_train_sum <- dummy_train %>% 
   mutate(Sample = rownames(.),
-         RAD_ID = str_sub(Sample, end = 6)) %>%
-  group_by(RAD_ID) %>% summarise(Asthma = mean(Asthma),
+         ID = str_sub(Sample, end = 6)) %>%
+  group_by(ID) %>% summarise(Asthma = mean(Asthma),
                                  Not_Asthma = mean(`Not Asthma`)) %>%
   mutate(comp1 = ifelse(Asthma > Not_Asthma, 'Asthma', 'Not Asthma'))
   
 out_train_pat <- dummy_train_sum %>% dplyr::select(comp1) %>% as.data.frame()
-rownames(out_train_pat) <- dummy_train_sum$RAD_ID
+rownames(out_train_pat) <- dummy_train_sum$ID
 
-input_pat <- test %>% dplyr::select(RAD_ID, Diagnosis) %>% distinct()
-input_pat <- input_pat[match(rownames(out_train_pat), input_pat$RAD_ID), ]     
+input_pat <- test %>% dplyr::select(ID, Diagnosis) %>% distinct()
+input_pat <- input_pat[match(rownames(out_train_pat), input_pat$ID), ]     
 
 conf_train_pat <- table(factor(out_train_pat$comp1, levels = levels(as.factor(input_pat$Diagnosis))), 
                     input_pat$Diagnosis)
@@ -400,14 +406,13 @@ auc(roc_train)
 #
 #
 
-# prediction performance in cross-validation
-
+# Prediction performance in cross-validation
 # create M-fold cross-validation method for final MINT model
 # preserve all observations from one patient in either train or held-out fold
 fold_fun <- function(data, nfold){
-  p <- n_distinct(data$RAD_ID)
+  p <- n_distinct(data$ID)
   x <- sample(1:p)
-  names(x) <- unique(data$RAD_ID)
+  names(x) <- unique(data$ID)
   levels <- nfold
   folds <- split(x, x%%levels)
   }
@@ -415,9 +420,9 @@ fold_fun <- function(data, nfold){
 # train model on nfold-1 and test on the left-out fold
 train_test <- function(data, folds, m){
   test_id <- folds[[m]]
-  test_data <- data %>% filter(RAD_ID %in% names(test_id)) %>%
+  test_data <- data %>% filter(ID %in% names(test_id)) %>%
     mutate(study = ifelse(CoreVisit == 'CV1', '1', '2')) %>% relocate(study)
-  train_data <- data %>% filter(RAD_ID %ni% names(test_id)) %>%
+  train_data <- data %>% filter(ID %ni% names(test_id)) %>%
     mutate(study = ifelse(CoreVisit == 'CV1', '1', '2')) %>% relocate(study)
   model <- mint.plsda(X = train_data[,-c(1:5)], Y = train_data$Diagnosis, 
                        study = as.factor(train_data$study), ncomp = 1)
@@ -425,9 +430,9 @@ train_test <- function(data, folds, m){
                         newdata = test_data[,-c(1:5)],
                         dist = 'max.dist',
                         study.test = as.factor(test_data$study))
-  model_pred1 <- append(model_pred, list(test_data$Diagnosis)) %>% append(list(test_data$RAD_ID))
+  model_pred1 <- append(model_pred, list(test_data$Diagnosis)) %>% append(list(test_data$ID))
   names(model_pred1)[[9]] <- 'truth'
-  names(model_pred1)[[10]] <- 'RAD_ID'
+  names(model_pred1)[[10]] <- 'ID'
   model_pred1
   }
 
@@ -449,12 +454,12 @@ cv_perf <- function(nrep, nfold, input_cv, pred_level){
       
       if (pred_level == 'patient') {
       # for subject-level prediction use code below
-      cv_pred <- cbind(cv_model_pred[['RAD_ID']], as.data.frame(cv_model_pred[["predict"]]))
-      colnames(cv_pred) <- c('RAD_ID', 'Asthma_pred', 'Not_Asthma_pred')
-      sum_cv_pred <- cv_pred %>% group_by(RAD_ID) %>% 
+      cv_pred <- cbind(cv_model_pred[['ID']], as.data.frame(cv_model_pred[["predict"]]))
+      colnames(cv_pred) <- c('ID', 'Asthma_pred', 'Not_Asthma_pred')
+      sum_cv_pred <- cv_pred %>% group_by(ID) %>% 
         summarise(Asthma_pred = mean(Asthma_pred),
                   Not_Asthma_pred = mean(Not_Asthma_pred)) %>%
-        left_join(input_cv %>% dplyr::select(RAD_ID, Diagnosis)) %>%
+        left_join(input_cv %>% dplyr::select(ID, Diagnosis)) %>%
         mutate(pred = ifelse(Asthma_pred > Not_Asthma_pred, 'Asthma', 'Not Asthma')) %>%
         distinct()
       cv_out_pred <- sum_cv_pred$pred
@@ -546,12 +551,12 @@ cv_auc <- function(nrep, nfold, input_cv, pred_level){
       
       if (pred_level == 'patient') {
         # for subject-level prediction use code below
-        cv_pred <- cbind(cv_model_pred[['RAD_ID']], as.data.frame(cv_model_pred[["predict"]]))
-        colnames(cv_pred) <- c('RAD_ID', 'Asthma_pred', 'Not_Asthma_pred')
-        sum_cv_pred <- cv_pred %>% group_by(RAD_ID) %>% 
+        cv_pred <- cbind(cv_model_pred[['ID']], as.data.frame(cv_model_pred[["predict"]]))
+        colnames(cv_pred) <- c('ID', 'Asthma_pred', 'Not_Asthma_pred')
+        sum_cv_pred <- cv_pred %>% group_by(ID) %>% 
           summarise(Asthma_pred = mean(Asthma_pred),
                     Not_Asthma_pred = mean(Not_Asthma_pred)) %>%
-          left_join(input_cv %>% dplyr::select(RAD_ID, Diagnosis)) %>%
+          left_join(input_cv %>% dplyr::select(ID, Diagnosis)) %>%
           mutate(pred = ifelse(Asthma_pred > Not_Asthma_pred, 'Asthma', 'Not Asthma')) %>%
           distinct()
         dummy_pred_out <- sum_cv_pred %>% dplyr::select(Asthma_pred, Diagnosis) %>%
@@ -651,7 +656,7 @@ ggsave('AUROC_CV_B2.tiff', unit = 'mm', dpi = 300, width = 120, height = 100)
 # Model loadings
 # extract loadings from the model and annotate with VOC origin categories
 # specify model for analysis
-mod <- base1
+mod <- base
 
 #
 loads_glob <- mod$loadings$X %>% as.data.frame() %>%
@@ -665,7 +670,9 @@ vip <- vip(mod) %>% as.data.frame() %>% mutate(comp = rownames(.)) %>%
 
 loads_glob <- loads_glob %>% left_join(vip) %>%
   mutate(FC_filter = ifelse(FC_filter == 'Endo_both_datasets', 'Breath-enriched (both datasets)',
-                            ifelse(FC_filter == 'Exo', 'Ambiguous', 'Breath-enriched (one dataset)')))
+                            ifelse(FC_filter == 'Exo', 'Ambiguous', 'Breath-enriched (one dataset)'))) 
+
+loads_glob <- drop_na(loads_glob)
 
 # plot most important loadings 
 pals <- grafify::graf_palettes
@@ -685,7 +692,6 @@ Lglob1 <- loads_glob  %>%
   theme(axis.title.y = element_blank(),
         axis.title.x = element_blank(),
         axis.text.x = element_text(size = 6),
-        legend.position = 'none',
         plot.title = element_text(hjust = 0.5, size = 8),
         panel.grid = element_blank(),
         plot.margin = unit(c(0.1, 0.2, 0.1, 0.2), 'cm'),
@@ -697,21 +703,38 @@ Lglob1 <- loads_glob  %>%
 
 Lglob1
 
+# format compound names
+l2_names <- loads_glob %>%
+  arrange(desc(abs(comp1))) %>% 
+  slice(1:20) %>% dplyr::select(comp)
+l2_names <- l2_names$comp
+l2_names_corr <- c('d-menthone', 'p-menth-8-en-3-ol', 'unknown C12H24', '(S)-(+)-6-methyl-1-octanol',
+                   'ethane, 1,1,2-trichloro-1,2,2-...', 'menthol isomer', 'toluene', 
+                   '4-thyl-2,2-dimethylhexane', 'hexane, 2,2,5-trimethyl-',
+                   'menthofuran', 'cyclohexanone', 'ethyl butanoate', 'dibenzofuran', 'benzene, 1,4-dichloro-',
+                   'styrene', 'p-Xylene', 'ethylbenzene', 'acetic acid, 1,7,7-trimethyl-...',
+                   '2-methylfuran', 'pentadecafluorooctanoid acid')
+
+#
+
+l1_names <- loads_glob  %>%
+  arrange(desc(abs(comp1))) %>% 
+  slice(1:20) %>% dplyr::select(comp)
+l1_names <- l1_names$comp
+l1_names_corr <- c('methyl thiocyanate', 'sulfide, allyl methyl', '1-pentanol', 
+                   'propane, 1-(methylthio)-', 'pyridine', '1-propanol, 2-ethoxy-',
+                   '1-propene, 1-(methylthio)-, (E)-', 'methylthioacetate', 'hexane, 2,3-dimethyl-',
+                   'heptane', '3-pethylbutan-1-ol', '2-putanone', '1-propene, 1-(methylthio)-, (Z)-',
+                   'benzene, 1-ethyl-2-methyl-', 'cyclohexane, ethenyl-', 'bicyclo[3.1.0]hexane, 4-...',
+                   '3-pctene, (Z)-', 'benzene, propyl-', 'ethyl butanoate', 'isopropyl alcohol')
+
+#
+
 l1_mint <- Lglob1 + ggtitle('Validation dataset') +
-  scale_y_discrete(labels = c('X1_Propene._1_.methylthio._._.E.' = '1_Propene_1_(methylthio)_(E)_',
-                              'X1_Propene._1_.methylthio._._.Z.' = '1_Propene_1_(methylthio)_(Z)_',
-                              'Bicyclo.3.1.0.hexane._4_methylen' = 'Bicyclo.3.1.0.hexane._4_',
-                              'X1_Propanol._2_ethoxy_' = '1_Propanol_2_ethoxy',
-                              'X3_methylbutan_1_ol' = '3_methylbutan_1_ol',
-                              'X2_Butanone' = '2_Butanone',
-                              'X3_Octene._.Z._' = '3_Octene_Z_',
-                              'X1_pentanol' = '1_Pentanol'))
+  scale_y_discrete(labels = l1_names_corr) + theme(legend.position = 'none')
 
 l2_mint <- Lglob1 + ggtitle('Training dataset') +
-  scale_y_discrete(labels = c('X.S._..._6_Methyl_1_octanol' = '(S)_(+)_6_Methyl_1_octanol',
-                              'X4_ethyl_2.2_dimethylhexane' = '4_ethyl_2,2_dimethylhexane',
-                              'Acetic_acid._1.7.7_trimethyl_bic' = 'Acetic_acid._1.7.7_trimethyl_',
-                              'Ethane._1.1.2_trichloro_1.2.2_tr' = 'Ethane._1.1.2_trichloro_'))
+  scale_y_discrete(labels = l2_names_corr) + theme(legend.position = 'none')
 
 leg3 <- get_legend(Lglob1)
 
@@ -730,9 +753,11 @@ ggsave('Loadings_MINT.tiff',
 
 # ratio of endo to exogenous VOCs among top loadings
 loads_glob1 <- loads_glob %>% arrange(desc(abs(comp1))) %>% filter(vip > 1) %>% 
-  mutate(comp1_class = ifelse(comp1 > 0, 'pos', 'neg')) 
+  mutate(comp1_class = ifelse(comp1 > 0, 'pos', 'neg')) %>% 
+  filter(comp != 'Dimethyltrisulfide')
 
-loads_glob_sum <- loads_glob1 %>% group_by(comp1_class, FC_filter) %>% summarise(n = n()) %>%
+loads_glob_sum <- loads_glob1  %>%
+  group_by(comp1_class, FC_filter) %>% summarise(n = n()) %>%
   mutate(ratio = ifelse(comp1_class == 'pos', n/table(loads_glob1$comp1_class)[2], 
                         n/table(loads_glob1$comp1_class)[1]))
 
@@ -776,7 +801,7 @@ plot3d <- plot_grid(l_sum_plots, leg3, ncol = 1, rel_heights = c(0.65, 0.35))
 plot(plot3d)
 
 plot3cd <- plot_grid(l_plots_mint, plot3d, labels = c('c)', 'd)'), label_size = 12,
-                  rel_widths = c(0.7, 0.3))
+                  rel_widths = c(0.71, 0.29))
 plot(plot3cd)
 
 ################################

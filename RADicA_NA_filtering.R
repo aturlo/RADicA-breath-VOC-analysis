@@ -2,12 +2,11 @@
 
 # author: Aggie Turlo
 # project: RADicA
-# date: 16/01/2022
+# date: 30/06/2025
 
 #####################
 
-library(dplyr)
-library(tidyr)
+library(tidyverse)
 library(ggplot2)
 library(pheatmap)
 library(tibble)
@@ -26,7 +25,7 @@ b1_all <- read.csv('RADicA_B1.csv')[,-1]
 
 
 # load patient metadata
-meta <- read.csv('Radica sample filenames aligned with clinical metadata.csv')
+meta <- read.csv('RADicA_VOC_metadata.csv')
 
 # custom functions
 '%ni%' <- Negate('%in%')
@@ -59,6 +58,7 @@ cnas <- function(d, cutoff){ # cutoff = % of NA per VOC
 cnas(b1_all[,-c(1:5)], 20)
 cnas(b2_all[,-c(1:5)], 20)
 
+# in each sample class separately
 cnas1 <- function(d, cl, cutoff1) {
   cnas(d %>% filter(class == cl) %>% dplyr::select(!1:5), cutoff = cutoff1) + ggtitle(cl)}
 
@@ -178,8 +178,8 @@ b2_all <- b2_all %>% filter(Sample %ni% c(s1_out_b2, s2_out_b2,
 
 ## FEATURE FILTERING
 # specify dataset for analysis
-data <- b1_all
-dat <- 'B1'
+data <- b2_all # b1_all
+dat <- 'B2' # 'B1
 
 #
 #
@@ -245,16 +245,16 @@ retain_var <- sums_s %>% filter(sum > 0)
 retain_var1 <- retain_var %>% filter(sum == 2)
 View(t(assay_naFf_s[,rownames(retain_var1)]))
 
+# saving outputs
+
 # retain features with < 20% NAs in S1 and/or S2 samples (in either diagnosis group)
 b1_all_f <- b1_all %>% dplyr::select(c(1:5, rownames(retain_var), rownames(complete_var)))
 
-#
-#
-#
-
-# change starting input!
+# same for dataset 2
 b2_all_f <- b2_all %>% dplyr::select(c(1:5, rownames(retain_var), rownames(complete_var)))
 
+#
+#
 #
 
 # compare retained VOCs between datasets

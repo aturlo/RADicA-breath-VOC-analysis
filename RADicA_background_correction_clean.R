@@ -2,12 +2,11 @@
 
 # author: Aggie Turlo
 # project: RADicA
-# date: 27/01/2025
+# date: 30/06/2025
 
 #####################
 
-library(dplyr)
-library(tidyr)
+library(tidyverse)
 library(ggplot2)
 library(gridExtra)
 library(lme4)
@@ -37,11 +36,12 @@ b1_imp_sum$Analysis_date <- as.Date(b1_imp_sum$Analysis_date)
 b2_imp_sum$Analysis_date <- as.Date(b2_imp_sum$Analysis_date)
 
 # load metadata
-meta <- read.csv('Radica sample filenames aligned with clinical metadata.csv')
+meta <- read.csv('RADicA_VOC_metadata.csv')[,-1]
 
 meta$Analysis_date <- as.Date(meta$Analysis_date, format = '%d/%m/%Y')
 
 # load list of outliers in background-breath linear model (dataset 2)
+# this file is available as Supplementary File 2 'Outlier list' sheet
 infl_obs <- read.csv('Deletion_diagnostics_formatted_B2.csv')[,-1]
 
 # load VOC annotation based on logFC filtering
@@ -71,7 +71,7 @@ reg_base <- function(df) {
       filter(obs %ni% c('infl'))
 
     
-    model <- lmer(logS ~ logBG + (1 | RAD_ID),
+    model <- lmer(logS ~ logBG + (1 | ID),
                   data = subset) 
     
     coefs <- as.data.frame(coef(summary(model))) %>%
@@ -121,7 +121,7 @@ del_diag <- function(df) {
       mutate(logS = log(S), logBG = log(BG)) 
     
     
-    model <- lmer(logS ~ logBG + (1 | RAD_ID),
+    model <- lmer(logS ~ logBG + (1 | ID),
                   data = subset)
     
     infl <- stats::influence(model)
@@ -295,79 +295,6 @@ base_results_b2_infl <- base_results_b2_infl %>%
   filter(predictor == 'logBG') %>%
   mutate(adj.p.value = p.adjust(p.value, method = 'BH'))
 
-#
-
-# Compare the effect of excluding influential observations on regression estimates
-# slopes (coefficients)
-base_results_comp <- base_results_b2 %>%
-  mutate(Data = 'All_data') %>%
-  rbind(base_results_b2_infl %>%
-          mutate(Data = 'Excl_outliers')) %>%
-  mutate(Sign = ifelse(adj.p.value < 0.05, 'Yes', 'No')) %>%
-  mutate(CI_width = CI_upr - CI_lwr) 
-
-
-base_results_comp1 <- base_results_comp %>%
-  pivot_wider(id_cols = comp, names_from = Data, values_from = c(Estimate, Sign, CI_width, r2)) %>%
-  mutate(Significant = ifelse(Sign_All_data == 'Yes' & Sign_Excl_outliers == 'Yes',
-                              'Both', ifelse(
-                                Sign_All_data == 'Yes' & Sign_Excl_outliers == 'No',
-                                'All_data', ifelse(
-                                  Sign_All_data == 'No' & Sign_Excl_outliers == 'No',
-                                  'None', 'Excl_outliers'
-                                )
-                              ))) 
-
-
-estimate_comp <- 
-  base_results_comp1 %>%
-  ggplot(aes(y = Estimate_All_data, x = Estimate_Excl_outliers)) + 
-  geom_point(aes(colour = Significant), size = 0.8, alpha = 0.6) +
-  coord_fixed() +
-  geom_abline(intercept = 0, slope = 1) +
-  theme_bw(base_size = 10) +
-  xlab('Excl. outliers') +
-  ylab('All data') +
-  ggtitle('Regression logBG coefficient') +
-  theme(legend.position = 'none')
-
-
-# confidence intervals
-CI_comp <- 
-  base_results_comp1 %>%
-  ggplot(aes(y = CI_width_All_data, x = CI_width_Excl_outliers)) + 
-  geom_point(aes(colour = Significant), size = 0.8, alpha = 0.6) +
-  coord_fixed() +
-  geom_abline(intercept = 0, slope = 1) +
-  theme_bw(base_size = 10) +
-  xlab('Excl. outliers') +
-  ylab('All data') +
-  ggtitle('Regression logBG 95% CI width') +
-  theme(legend.position = 'none')
-
-# R2 (varaince explained)
-r2_comp <- 
-  base_results_comp1 %>%
-  ggplot(aes(y = r2_All_data, x = r2_Excl_outliers)) + 
-  geom_point(aes(colour = Significant), size = 0.8, alpha = 0.6) +
-  coord_fixed() +
-  geom_abline(intercept = 0, slope = 1) +
-  theme_bw(base_size = 10) +
-  xlab('Excl. outliers') +
-  ylab('All data') +
-  ggtitle('Regression logBG R2')
-
-# save figures
-library(cowplot)
-
-comp_plots <- plot_grid(estimate_comp, CI_comp, r2_comp, nrow = 1, align = 'h',
-                        rel_widths = c(0.3, 0.3, 0.4))
-dev.new()
-comp_plots
-
-ggsave('Regression_comparison_del_diag.tiff' , comp_plots, dpi = 300, unit = 'mm',
-       width = 260, height = 80)
-
 
 #
 #
@@ -379,7 +306,7 @@ ggsave('Regression_comparison_del_diag.tiff' , comp_plots, dpi = 300, unit = 'mm
 # including covariates 
 
 # join with clinical metadata
-b2_imp_sum_annot <- b2_imp_sum %>% left_join(meta %>% dplyr::select(RAD_ID, Diagnosis)) %>% distinct() 
+b2_imp_sum_annot <- b2_imp_sum %>% left_join(meta %>% dplyr::select(ID, Diagnosis)) %>% distinct() 
 
 reg_fin <- function(df) {
   bind_rows(lapply(unique(df$comp), function(voc){
@@ -391,7 +318,7 @@ reg_fin <- function(df) {
       mutate(obs = ifelse(is.na(obs) == TRUE, NA, 'infl')) %>%
       filter(obs %ni% c('infl'))
     
-    model <- lmer(logS ~ logBG + Diagnosis + CoreVisit + (1 | RAD_ID),
+    model <- lmer(logS ~ logBG + Diagnosis + CoreVisit + (1 | ID),
                   data = subset)
     
     coefs <- cbind(as.data.frame(coef(summary(model))),
@@ -414,7 +341,7 @@ colnames(fin_results_b2)[5] <- 'p.value'
 
 write.csv(fin_results_b2, 'Final_BG_model_results_B2.csv')
 
-fin_results_b2 <- read.csv('Final_BG_model_results_B2.csv')[-1]
+fin_results_b2 <- read.csv('Final_BG_model_results_B2.csv')
 
 # number of VOCs with significant effect of background
 fin_results_b2_bg <- fin_results_b2 %>% 
@@ -586,24 +513,6 @@ ggsave('Final_model_r2VSbeta.tiff', units = 'mm', width = 85, height = 60)
 quantile(fin_results_b2_bg_sign$Estimate)
 quantile(fin_results_b2_bg_sign$r2)
 
-# relationship between linear model outputs and VOC origin annotation
-fin_results_b2_bg_class <- fin_results_b2_bg %>% 
-  left_join(endo_exo %>% filter(wilcox_filter != 'Neither_dataset')) %>%
-  mutate(bg_sign = ifelse(comp %in% fin_results_b2_bg_sign$comp, 'adj.p < 0.05', 'adj.p > 0.05'))
-
-
-fin_class_sum <- fin_results_b2_bg_class %>%
-  group_by(bg_sign, FC_filter) %>%
-  summarise(n = n()/n_distinct(fin_results_b2_bg$comp)*100) 
-
-fin_class_sum
-  
-fin_class_sum %>%
-  ggplot(aes(x = bg_sign, y = n/n_distinct(fin_results_b2_bg$comp)*100, fill = FC_filter)) +
-  geom_col() +
-  theme_bw() +
-  ylab('% VOCs') +
-  xlab('Background effect')
 
 #
 #
@@ -612,48 +521,6 @@ fin_class_sum %>%
 ################################
 
 # MODEL VALIDATION
-# Validation of regression models prediction in test dataset
-# Baseline model validation
-base_valid <- function(train, test){
-  bind_rows(lapply(unique(train$comp), function(voc) {
-  sub_train <- train %>%
-    filter(comp == voc) %>%
-    drop_na() %>%
-    mutate(logS = log(S), logBG = log(BG)) #%>%
-    #left_join(infl_obs) %>% # code to exclude influential points based on deletion diagnostics
-    #mutate(obs = ifelse(is.na(obs) == TRUE, NA, 'infl')) %>%
-    #filter(obs %ni% c('infl'))
-  
-  sub_test <- test %>%
-    filter(comp == voc) %>%
-    drop_na() %>%
-    mutate(logS = log(S), logBG = log(BG)) %>%
-    distinct() 
-  
-  model <- lmer(logS ~ logBG + (1 | RAD_ID),
-                data = sub_train)
-  
-  pred_test <- sub_test %>% 
-    mutate(logSpred = predict(model, newdata = sub_test, allow.new.levels = TRUE),
-           error = logSpred - logS)
-  
-  perf <- data.frame(mse = mean((pred_test$error)^2),
-                     mae = mean(abs(pred_test$error)),
-                     me = mean(pred_test$error),
-                     mape = mean(abs(pred_test$error/pred_test$logSpred)*100),
-                     comp = voc)
-  }))
-  }
-
-# Fit baseline model to test dataset
-base_results_b1 <- base_valid(b2_imp_sum, b1_imp_sum)
-
-# Fit baseline model trained without influential observations to test dataset
-# activate code excluding outliers in the function body above
-base_results_b1_infl <- base_valid(b2_imp_sum, b1_imp_sum)
-
-#
-
 # Final model validation
 fin_valid <- function(train, test){
   bind_rows(lapply(unique(train$comp), function(voc) {
@@ -671,7 +538,7 @@ fin_valid <- function(train, test){
       mutate(logS = log(S), logBG = log(BG)) %>%
       distinct() 
     
-    model_fin <- lmer(logS ~ logBG + Diagnosis + CoreVisit + (1 | RAD_ID),
+    model_fin <- lmer(logS ~ logBG + Diagnosis + CoreVisit + (1 | ID),
                   data = sub_train)
     
     pred_test_fin <- sub_test %>% 
@@ -687,8 +554,8 @@ fin_valid <- function(train, test){
 }
 
 # join with clinical metadata
-b2_imp_sum_annot <- b2_imp_sum %>% left_join(meta %>% dplyr::select(RAD_ID, Diagnosis)) %>% distinct() 
-b1_imp_sum_annot <- b1_imp_sum %>% left_join(meta %>% dplyr::select(RAD_ID, Diagnosis)) %>% distinct() 
+b2_imp_sum_annot <- b2_imp_sum %>% left_join(meta %>% dplyr::select(ID, Diagnosis)) %>% distinct() 
+b1_imp_sum_annot <- b1_imp_sum %>% left_join(meta %>% dplyr::select(ID, Diagnosis)) %>% distinct() 
 
 # Fit final model to test dataset
 fin_results_b1 <- fin_valid(b2_imp_sum_annot, b1_imp_sum_annot)
@@ -733,15 +600,9 @@ null_results_b1 <- null_valid(b2_imp_sum, b1_imp_sum)
 
 # compare prediction error in test dataset across three models
 # examine only VOCs where effect of background considered significant
-valid_results <- base_results_b1 %>%
-  pivot_longer(cols =! comp, names_to = 'error', values_to = 'value') %>%
-  mutate(model = 'Baseline') %>%
-  rbind(base_results_b1_infl %>%
+valid_results <- fin_results_b1 %>%
           pivot_longer(cols =! comp, names_to = 'error', values_to = 'value') %>%
-          mutate(model = 'Baseline_no_infl')) %>%
-  rbind(fin_results_b1 %>%
-          pivot_longer(cols =! comp, names_to = 'error', values_to = 'value') %>%
-          mutate(model = 'Final')) %>%
+          mutate(model = 'Final') %>%
   rbind(null_results_b1 %>%
           pivot_longer(cols =! comp, names_to = 'error', values_to = 'value') %>%
           mutate(model = 'Null')) %>%
@@ -794,10 +655,8 @@ median(valid_results_w$mape_diff_NF)/median(valid_results_w$mape_Null)
 #
 
 valid_results1 <- fin_results_b1 %>%
-  pivot_longer(cols =! comp, names_to = 'error', values_to = 'value') %>%
   mutate(model = 'Final') %>%
   rbind(null_results_b1 %>%
-          pivot_longer(cols =! comp, names_to = 'error', values_to = 'value') %>%
           mutate(model = 'Null'))
 
 write.csv(valid_results1, 'Final_BG_model_errors_B1.csv')
@@ -815,16 +674,30 @@ hist(asthma_pred_b2$p.value, breaks = 30)
 sd(asthma_pred_b2$p.value)
 
 #
-fin_results_b1 <- read.csv('Final_BG_model_errors_B1.csv')[,-1]
-fin_results_b1a <- fin_results_b1 %>% filter(model == 'Final') %>%
-  pivot_wider(names_from = error, values_from = value)
+valid_results1 <- read.csv('Final_BG_model_errors_B1.csv')[,-1]
+fin_results_b1 <- valid_results1 %>% filter(model == 'Final') 
 
 asthma_pred_b2b1 <- asthma_pred_b2 %>%
-  left_join(fin_results_b1a) %>%
-  mutate(lab = ifelse(p.value < 0.05 & abs(Estimate) > 0.4, comp, NA))
+  left_join(fin_results_b1) %>%
+  mutate(lab = ifelse(p.value < 0.05 & abs(Estimate) > 0.39, comp, NA))
+
+# correct spelling of VOC names
+lab <- asthma_pred_b2b1$lab[is.na(asthma_pred_b2b1$lab) == FALSE]
+
+corr_labs <- c('acetic acid, 1,7,7-trimethyl-bicyclo[2.2.1]hept-2-yl ester',
+               'd-menthone', 'dibenzofuran', 'ethyl butanoate',
+               '2-methylfuran', 'hexane, 2,2,5-trimethyl-', 'menthofuran',
+               'menthol isomer', 'p-menth-8-en-3-ol', 'unknown C12H24', 
+               '4-ethyl-2,2-dimethylhexane','isobutyl acetate')
+
+labs_corr <- cbind(lab, corr_labs) %>% as.data.frame()
+
+asthma_pred_b2b1 <- asthma_pred_b2b1 %>% left_join(labs_corr, by = 'lab')
+
+#
 
 colvalquant <- base::seq(from = 0, to = 1, length.out = 5)
-quants <- quantile(asthma_pred_b2b1$mape, colvalquant)
+quants <- quantile(asthma_pred_b2b1$mape, colvalquant, na.rm = TRUE)
 asthma_pred_b2b1$ptile_var <- ecdf(asthma_pred_b2b1$mape)(asthma_pred_b2b1$mape)
 
 #
@@ -835,7 +708,7 @@ vol_plot1 <- asthma_pred_b2b1 %>%
   geom_vline(xintercept = c(-0.4, 0.4), linetype = 'dashed', colour = 'darkgrey', lwd = 0.3) +
   geom_hline(yintercept = -log10(0.05), linetype = 'dashed', colour = 'darkgrey', lwd = 0.3) +
   theme_bw(base_size = 8) +
-  geom_text_repel(aes(label = str_sub(lab, end = 26)), size = 1.8,
+  geom_text_repel(aes(label = str_sub(corr_labs, end = 26)), size = 1.8,
                   point.padding = 0.1, nudge_y = 0.01, lwd = 0.3) +
   scale_fill_viridis_c(name = 'Validation dataset error (MAPE)',
                          labels = c(round(quants, 1)),
