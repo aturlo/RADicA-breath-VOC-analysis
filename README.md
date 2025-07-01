@@ -1,1 +1,1 @@
-Analysis of GC-MS data obtained from breath and air samples in RADicA study (Rapid Access Diagnostics for Asthma). 
+Analysis of GC-MS metabolomic data obtained from breath and air samples in RADicA study (Rapid Access Diagnostics for Asthma). Accounting for background volatile organic compounds and identifying potential breath biomarkers of asthma.
